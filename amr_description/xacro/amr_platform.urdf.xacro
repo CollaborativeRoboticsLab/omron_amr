@@ -1,0 +1,172 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="amr_platform_lib"> 
+
+<xacro:macro name="amr_platform" params="prefix:='' parent:='' xyz:='0 0 0' rpy:='0 0 0' mesh_pkg:='amr_description'">  
+
+<!-- Materials (prefixed to avoid collisions) -->
+<material name="${prefix}blue"><color rgba="0 0 0.8 1"/></material>
+<material name="${prefix}black"><color rgba="0 0 0 1"/></material>
+<material name="${prefix}white"><color rgba="1 1 1 1"/></material>
+
+<!-- Links -->
+<link name="${prefix}base_link"/>
+
+<link name="${prefix}main_body">
+  <visual>
+    <origin rpy="1.5707963267949 0 1.5707963267949" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://${mesh_pkg}/meshes/AMR_Platform.STL"/>
+    </geometry>
+    <material name="${prefix}white"/>
+  </visual>
+  <collision>
+    <origin rpy="1.5707963267949 0 1.5707963267949" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://${mesh_pkg}/meshes/AMR_Platform.STL"/>
+    </geometry>
+  </collision>
+  <inertial>
+    <mass value="4.07"/>
+    <inertia ixx="0.426" ixy="0.0" ixz="0.0" iyy="0.496" iyz="0.0" izz="0.91"/>
+  </inertial>
+</link>
+
+<!-- Joints -->
+<joint name="${prefix}main_body_to_base" type="fixed">
+  <parent link="${prefix}base_link"/>
+  <child link="${prefix}main_body"/>
+  <origin xyz="0 0 0.085"/>
+</joint>
+
+<!-- Left drive wheel -->
+<link name="${prefix}left_wheel">
+  <visual>
+    <origin rpy="1.5707963267949 0 0" xyz="0 0 0"/>
+    <geometry><cylinder length="0.03937" radius="0.088"/></geometry>
+    <material name="${prefix}black"/>
+  </visual>
+  <collision>
+    <geometry><cylinder length="0.03937" radius="0.088"/></geometry>
+  </collision>
+  <inertial>
+    <mass value="0.17"/>
+    <inertia ixx="0.000204" ixy="0.0" ixz="0.0" iyy="0.000306" iyz="0.0" izz="0.000204"/>
+  </inertial>
+</link>
+<joint name="${prefix}left_wheel_joint" type="continuous">
+  <axis xyz="0 1 0"/>
+  <parent link="${prefix}main_body"/>
+  <child link="${prefix}left_wheel"/>
+  <origin rpy="0 0 0" xyz="0 0.196425 0.000881"/>
+</joint>
+
+<!-- Right drive wheel -->
+<link name="${prefix}right_wheel">
+  <visual>
+    <origin rpy="1.5707963267949 0 0" xyz="0 0 0"/>
+    <geometry><cylinder length="0.03937" radius="0.088"/></geometry>
+    <material name="${prefix}black"/>
+  </visual>
+  <collision>
+    <geometry><cylinder length="0.03937" radius="0.088"/></geometry>
+  </collision>
+  <inertial>
+    <mass value="0.17"/>
+    <inertia ixx="0.000204" ixy="0.0" ixz="0.0" iyy="0.000306" iyz="0.0" izz="0.000204"/>
+  </inertial>
+</link>
+<joint name="${prefix}right_wheel_joint" type="continuous">
+  <axis xyz="0 1 0"/>
+  <parent link="${prefix}main_body"/>
+  <child link="${prefix}right_wheel"/>
+  <origin rpy="3.1415926535897 0 0" xyz="0 -0.196425 0.000881"/>
+</joint>
+
+<!-- Small casters -->
+<link name="${prefix}right_front_small_wheel">
+  <visual>
+    <origin rpy="1.5707963267949 0 0" xyz="0 0 0"/>
+    <geometry><cylinder length="0.02775" radius="0.0375"/></geometry>
+    <material name="${prefix}black"/>
+  </visual>
+  <collision><geometry><cylinder length="0.02775" radius="0.0375"/></geometry></collision>
+  <inertial>
+    <mass value="0.17"/>
+    <inertia ixx="0.000204" ixy="0.0" ixz="0.0" iyy="0.000306" iyz="0.0" izz="0.000204"/>
+  </inertial>
+</link>
+<joint name="${prefix}right_front_small_wheel_joint" type="continuous">
+  <axis xyz="0 1 0"/>
+  <parent link="${prefix}main_body"/>
+  <child link="${prefix}right_front_small_wheel"/>
+  <origin rpy="3.1415926535897 0 0" xyz="0.209 -0.108 -0.049"/>
+</joint>
+
+<link name="${prefix}left_front_small_wheel">
+  <visual>
+    <origin rpy="1.5707963267949 0 0" xyz="0 0 0"/>
+    <geometry><cylinder length="0.02775" radius="0.0375"/></geometry>
+    <material name="${prefix}black"/>
+  </visual>
+  <collision><geometry><cylinder length="0.02775" radius="0.0375"/></geometry></collision>
+  <inertial>
+    <mass value="0.17"/>
+    <inertia ixx="0.000204" ixy="0.0" ixz="0.0" iyy="0.000306" iyz="0.0" izz="0.000204"/>
+  </inertial>
+</link>
+<joint name="${prefix}left_front_small_wheel_joint" type="continuous">
+  <axis xyz="0 1 0"/>
+  <parent link="${prefix}main_body"/>
+  <child link="${prefix}left_front_small_wheel"/>
+  <origin rpy="0 0 0" xyz="0.209 0.108 -0.049"/>
+</joint>
+
+<link name="${prefix}left_back_small_wheel">
+  <visual>
+    <origin rpy="1.5707963267949 0 0" xyz="0 0 0"/>
+    <geometry><cylinder length="0.02775" radius="0.0375"/></geometry>
+    <material name="${prefix}black"/>
+  </visual>
+  <collision><geometry><cylinder length="0.02775" radius="0.0375"/></geometry></collision>
+  <inertial>
+    <mass value="0.17"/>
+    <inertia ixx="0.000204" ixy="0.0" ixz="0.0" iyy="0.000306" iyz="0.0" izz="0.000204"/>
+  </inertial>
+</link>
+<joint name="${prefix}left_back_small_wheel_joint" type="continuous">
+  <axis xyz="0 1 0"/>
+  <parent link="${prefix}main_body"/>
+  <child link="${prefix}left_back_small_wheel"/>
+  <origin rpy="0 0 0" xyz="-0.228 0.156 -0.049"/>
+</joint>
+
+<link name="${prefix}right_back_small_wheel">
+  <visual>
+    <origin rpy="1.5707963267949 0 0" xyz="0 0 0"/>
+    <geometry><cylinder length="0.02775" radius="0.0375"/></geometry>
+    <material name="${prefix}black"/>
+  </visual>
+  <collision><geometry><cylinder length="0.02775" radius="0.0375"/></geometry></collision>
+  <inertial>
+    <mass value="0.17"/>
+    <inertia ixx="0.000204" ixy="0.0" ixz="0.0" iyy="0.000306" iyz="0.0" izz="0.000204"/>
+  </inertial>
+</link>
+<joint name="${prefix}right_back_small_wheel_joint" type="continuous">
+  <axis xyz="0 1 0"/>
+  <parent link="${prefix}main_body"/>
+  <child link="${prefix}right_back_small_wheel"/>
+  <origin rpy="3.1415926535897 0 0" xyz="-0.228 -0.156 -0.049"/>
+</joint>
+
+<!-- Optional mount to an external parent -->
+<xacro:if value="${parent != ''}">
+  <joint name="${prefix}base_mount" type="fixed">
+    <parent link="${parent}"/>
+    <child link="${prefix}base_link"/>
+    <origin xyz="${xyz}" rpy="${rpy}"/>
+  </joint>
+</xacro:if>
+
+</xacro:macro>
+</robot> 

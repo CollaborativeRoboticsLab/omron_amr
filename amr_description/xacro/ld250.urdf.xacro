@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ld250_lib"> 
+
+<xacro:macro name="ld250" params="prefix:='' parent:='' xyz:='0 0 0' rpy:='0 0 0' mesh_pkg:='amr_description'"> 
+<material name="${prefix}blue"><color rgba="0 0 0.8 1"/></material>
+<material name="${prefix}black"><color rgba="0 0 0 1"/></material>
+<material name="${prefix}white"><color rgba="1 1 1 1"/></material>
+
+<link name="${prefix}base_link"/>
+
+<link name="${prefix}main_body">
+  <visual>
+    <origin rpy="0 0 3.141582654" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://${mesh_pkg}/meshes/LD250.obj"/>
+    </geometry>
+    <material name="${prefix}white"/>
+  </visual>
+  <collision>
+    <origin rpy="0 0 3.141592654" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://${mesh_pkg}/meshes/LD250.obj"/>
+    </geometry>
+  </collision>
+  <inertial>
+    <mass value="4.07"/>
+    <inertia ixx="0.426" ixy="0.0" ixz="0.0" iyy="0.496" iyz="0.0" izz="0.91"/>
+  </inertial>
+</link>
+
+<joint name="${prefix}main_body_to_base" type="fixed">
+  <parent link="${prefix}base_link"/>
+  <child link="${prefix}main_body"/>
+  <origin xyz="0 0 0"/>
+</joint>
+
+<xacro:if value="${parent != ''}">
+  <joint name="${prefix}base_mount" type="fixed">
+    <parent link="${parent}"/>
+    <child link="${prefix}base_link"/>
+    <origin xyz="${xyz}" rpy="${rpy}"/>
+  </joint>
+</xacro:if>
+
+  </xacro:macro>
+</robot> 
