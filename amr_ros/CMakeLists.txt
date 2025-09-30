@@ -8,11 +8,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(DIRECTORY config
+install(DIRECTORY config launch map rviz
   DESTINATION share/${PROJECT_NAME}
 )
 

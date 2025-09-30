@@ -120,7 +120,7 @@ install(TARGETS
 )
 
 install(
-  DIRECTORY launch config map meshes param urdf xacro
+  DIRECTORY meshes urdf xacro
   DESTINATION share/${PROJECT_NAME}
 )
 

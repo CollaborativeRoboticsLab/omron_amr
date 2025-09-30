@@ -26,7 +26,7 @@ setup(
             'dock = amr_core.dock:main',
             'goto_point = amr_core.goto_point:main',
             'localize_at_point = amr_core.localize_at_point:main',
-            'execute_macro = amr_core.execute_macro:main'
+            'execute_macro = amr_core.execute_macro:main',
             'arcl_api_server = amr_core.arcl_api_server:main',
             'ld_states_publisher = amr_core.ld_states_publisher:main',
         ],

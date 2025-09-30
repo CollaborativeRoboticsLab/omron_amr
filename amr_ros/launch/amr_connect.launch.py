@@ -8,7 +8,7 @@ import os
 def generate_launch_description():
 
     arcl_api = Node(
-        package='amr_ros',
+        package='amr_core',
         executable='arcl_api_server',
         #name='arcl_api_server',
         output='log',
@@ -20,12 +20,12 @@ def generate_launch_description():
     )
 
     ld_states = Node(
-        package='amr_ros',
+        package='amr_core',
         executable='ld_states_publisher',
         #name='ld_states_publi',
         output='screen',
         parameters=[{
-            'local_ip': "192.168.1.50",
+            'local_ip': "192.168.1.1",
             'local_port': 7179
         }]
     )
