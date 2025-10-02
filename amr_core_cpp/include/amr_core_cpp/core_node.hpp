@@ -1,106 +1,575 @@
-#include <functional>
+#pragma once
+
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <chrono>
 #include <memory>
+#include <string>
+#include <vector>
+#include <sstream>
 #include <thread>
 
-#include "rclcpp/rclcpp.hpp"
-#include "rclcpp_action/rclcpp_action.hpp"
+#include <std_msgs/msg/string.hpp>
+#include <amr_msgs/msg/status.hpp>
+#include <amr_msgs/msg/location.hpp>
+#include <amr_msgs/srv/arcl_api.hpp>
+#include <amr_msgs/action/action.hpp>
 
-#include "action_tutorials_cpp/visibility_control.h"
+#include "amr_core_cpp/socket_listener.hpp"
+#include "amr_core_cpp/socket/socket_driver.hpp"
+#include "amr_core_cpp/socket/socket_taskmaster.hpp"
+#include "amr_core_cpp/utils/parser.hpp"
+#include "amr_core_cpp/utils/amr_exception.hpp"
 
-namespace amr
-{
 class CoreNode : public rclcpp::Node
 {
 public:
-  explicit CoreNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions()) : Node("core_node", options)
-  {
-    try
-    {
-      // Only call setup if this object is already owned by a shared_ptr
-      if (shared_from_this())
-      {
-        initialize();
-      }
-    }
-    catch (const std::bad_weak_ptr&)
-    {
-      // Not yet safe — probably standalone without make_shared
-    }
-  }
+  using ServiceT = amr_msgs::srv::ArclApi;
+  using ActionT = amr_msgs::action::Action;
+  using GoalHandle = rclcpp_action::ServerGoalHandle<ActionT>;
 
-  void initialize()
+  CoreNode() : rclcpp::Node("core_node")
   {
-    RCLCPP_INFO(this->get_logger(), "Core node initialized");
+    using namespace std::chrono_literals;
 
-    this->action_server_ = rclcpp_action::create_server<Fibonacci>(
-        this, "fibonacci", std::bind(&FibonacciActionServer::handle_goal, this, _1, _2),
-        std::bind(&FibonacciActionServer::handle_cancel, this, _1),
-        std::bind(&FibonacciActionServer::handle_accepted, this, _1));
+    // Shared connection params (service + action)
+    ip_ = this->declare_parameter<std::string>("ip_address", "127.0.0.1");
+    port_ = this->declare_parameter<int>("port", 0);
+    passwd_ = this->declare_parameter<std::string>("def_arcl_passwd", "");
+    svc_timeout_ms_ = this->declare_parameter<int>("service_timeout_ms", 15000);
+
+    // Publisher (listener) endpoint (defaults to same ip/port if not set)
+    pub_ip_ = this->declare_parameter<std::string>("local_ip", ip_);
+    pub_port_ = this->declare_parameter<int>("local_port", port_);
+
+    // Feature toggles
+    enable_pub_ = this->declare_parameter<bool>("enable_publisher", true);
+    enable_service_ = this->declare_parameter<bool>("enable_service", true);
+    enable_action_ = this->declare_parameter<bool>("enable_action", true);
+
+    // Create publishers if enabled
+    if (enable_pub_)
+    {
+      status_pub_ = this->create_publisher<amr_msgs::msg::Status>("ldarcl_status", 10);
+      laser_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_laser", 10);
+      goals_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_all_goals", 10);
+      odom_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_odom", 10);
+      app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_application_fault_query", 10);
+      faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_faults_get", 10);
+      query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_query_faults", 10);
+    }
+
+    // Defer initialization (requires shared_from_this)
+    init_timer_ = this->create_wall_timer(0ms, [this]() {
+      init_timer_->cancel();
+      init_components();
+    });
   }
 
 private:
-  rclcpp_action::Server<Fibonacci>::SharedPtr action_server_;
-
-  rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID& uuid,
-                                          std::shared_ptr<const Fibonacci::Goal> goal)
+  void init_components()
   {
-    RCLCPP_INFO(this->get_logger(), "Received goal request with order %d", goal->order);
-    (void)uuid;
+    using namespace std::chrono_literals;
+
+    // Service: SocketDriver (low-level, mirrors Python arcl_api_service)
+    if (enable_service_)
+    {
+      try
+      {
+        drv_ = std::make_shared<SocketDriver>(this->shared_from_this());
+        (void)drv_->connect(ip_, static_cast<uint16_t>(port_));
+        login_with_driver(passwd_);
+        srv_ = this->create_service<ServiceT>("arcl_api_service",
+                                              std::bind(&CoreNode::handle_service, this, std::placeholders::_1,
+                                                        std::placeholders::_2, std::placeholders::_3));
+        RCLCPP_INFO(this->get_logger(), "ARCL API Service ready @ %s:%d", ip_.c_str(), port_);
+      }
+      catch (const amr_exception& ex)
+      {
+        RCLCPP_FATAL(this->get_logger(), "SocketDriver init failed: %s", ex.what());
+      }
+    }
+
+    // Action server: SocketTaskmaster (high-level)
+    if (enable_action_)
+    {
+      try
+      {
+        tm_ = std::make_shared<SocketTaskmaster>(this->shared_from_this());
+        (void)tm_->connect(ip_, port_);
+        tm_->login(passwd_);
+        server_ = rclcpp_action::create_server<ActionT>(
+            this->shared_from_this(), "action_server",
+            std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
+            std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
+        RCLCPP_INFO(this->get_logger(), "Action server is up @ %s:%d", ip_.c_str(), port_);
+      }
+      catch (const amr_exception& ex)
+      {
+        RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster init failed: %s", ex.what());
+      }
+    }
+
+    // Publisher: SocketListener
+    if (enable_pub_)
+    {
+      try
+      {
+        listener_ = std::make_shared<SocketListener>(this->shared_from_this(), pub_ip_, pub_port_);
+        if (!listener_->begin())
+        {
+          RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
+        }
+        else
+        {
+          pub_timer_ = this->create_wall_timer(200ms, [this]() { on_pub_timer(); });
+          RCLCPP_INFO(this->get_logger(), "States publisher on %s:%d", pub_ip_.c_str(), pub_port_);
+        }
+      }
+      catch (const amr_exception& ex)
+      {
+        RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
+      }
+    }
+  }
+
+  // -------- Service (ARCL API via SocketDriver) --------
+  void login_with_driver(const std::string& passwd)
+  {
+    using namespace std::chrono_literals;
+    drv_->send_line(passwd);
+    auto start = std::chrono::steady_clock::now();
+    std::vector<std::string> lines;
+    for (;;)
+    {
+      drv_->poll_once(100);
+      lines.clear();
+      drv_->read_lines(lines);
+      for (const auto& ln : lines)
+      {
+        if (ln.find("End of commands") != std::string::npos)
+          return;
+      }
+      if (std::chrono::steady_clock::now() - start > std::chrono::seconds(15))
+      {
+        throw amr_exception("Login timeout");
+      }
+    }
+  }
+
+  void handle_service(const std::shared_ptr<rmw_request_id_t>&, const std::shared_ptr<ServiceT::Request> req,
+                      std::shared_ptr<ServiceT::Response> resp)
+  {
+    if (!drv_)
+    {
+      resp->response = "ERROR: driver not available";
+      return;
+    }
+
+    try
+    {
+      drv_->send_line(req->command);
+    }
+    catch (const amr_exception& ex)
+    {
+      RCLCPP_ERROR(this->get_logger(), "send_line failed: %s", ex.what());
+      resp->response = std::string("ERROR: ") + ex.what();
+      return;
+    }
+
+    std::vector<std::string> end_lines(req->line_identifier.begin(), req->line_identifier.end());
+    auto start = std::chrono::steady_clock::now();
+    std::vector<std::string> lines;
+
+    while (rclcpp::ok())
+    {
+      try
+      {
+        drv_->poll_once(100);
+      }
+      catch (const amr_exception& ex)
+      {
+        RCLCPP_ERROR(this->get_logger(), "poll_once error: %s", ex.what());
+        resp->response = std::string("ERROR: ") + ex.what();
+        return;
+      }
+
+      lines.clear();
+      drv_->read_lines(lines);
+      for (const auto& ln : lines)
+      {
+        for (const auto& id : end_lines)
+        {
+          if (!id.empty() && ln.find(id) != std::string::npos)
+          {
+            resp->response = ln;
+            return;
+          }
+        }
+      }
+
+      if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(svc_timeout_ms_))
+      {
+        RCLCPP_WARN(this->get_logger(), "Service timeout after %d ms", svc_timeout_ms_);
+        resp->response = "TIMEOUT";
+        return;
+      }
+    }
+    resp->response = "SHUTDOWN";
+  }
+
+  // -------- Action server (SocketTaskmaster) --------
+  rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID&, std::shared_ptr<const ActionT::Goal>)
+  {
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
 
-  rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandleFibonacci> goal_handle)
+  rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandle>)
   {
-    RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
-    (void)goal_handle;
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
-  void handle_accepted(const std::shared_ptr<GoalHandleFibonacci> goal_handle)
+  void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle)
   {
-    using namespace std::placeholders;
-    // this needs to return quickly to avoid blocking the executor, so spin up a new thread
-    std::thread{ std::bind(&FibonacciActionServer::execute, this, _1), goal_handle }.detach();
+    std::thread(&CoreNode::execute, this, goal_handle).detach();
   }
 
-  void execute(const std::shared_ptr<GoalHandleFibonacci> goal_handle)
+  void execute(const std::shared_ptr<GoalHandle> goal_handle)
   {
-    RCLCPP_INFO(this->get_logger(), "Executing goal");
-    rclcpp::Rate loop_rate(1);
-    const auto goal = goal_handle->get_goal();
-    auto feedback = std::make_shared<Fibonacci::Feedback>();
-    auto& sequence = feedback->partial_sequence;
-    sequence.push_back(0);
-    sequence.push_back(1);
-    auto result = std::make_shared<Fibonacci::Result>();
-
-    for (int i = 1; (i < goal->order) && rclcpp::ok(); ++i)
+    if (!tm_)
     {
-      // Check if there is a cancel request
+      auto result = std::make_shared<ActionT::Result>();
+      result->res_msg = "Taskmaster unavailable";
+      goal_handle->abort(result);
+      return;
+    }
+
+    Parser parser;
+    auto goal = goal_handle->get_goal();
+
+    std::vector<std::string> end_lines;
+    if (!goal->identifier.empty())
+      end_lines.emplace_back(goal->identifier.front());
+
+    try
+    {
+      tm_->push_command(goal->command, true, end_lines);
+    }
+    catch (const amr_exception& ex)
+    {
+      auto result = std::make_shared<ActionT::Result>();
+      result->res_msg = std::string("push_command failed: ") + ex.what();
+      goal_handle->abort(result);
+      return;
+    }
+
+    auto feedback = std::make_shared<ActionT::Feedback>();
+    auto result = std::make_shared<ActionT::Result>();
+    auto start = std::chrono::steady_clock::now();
+
+    while (rclcpp::ok())
+    {
       if (goal_handle->is_canceling())
       {
-        result->sequence = sequence;
+        result->res_msg = "Canceled";
         goal_handle->canceled(result);
-        RCLCPP_INFO(this->get_logger(), "Goal canceled");
         return;
       }
-      // Update sequence
-      sequence.push_back(sequence[i] + sequence[i - 1]);
-      // Publish feedback
-      goal_handle->publish_feedback(feedback);
-      RCLCPP_INFO(this->get_logger(), "Publish feedback");
 
-      loop_rate.sleep();
+      SocketTaskmaster::WaitResult wr{ false, "", "" };
+      try
+      {
+        wr = tm_->wait_command(100);
+      }
+      catch (const amr_exception& ex)
+      {
+        result->res_msg = std::string("wait_command error: ") + ex.what();
+        goal_handle->abort(result);
+        return;
+      }
+
+      if (!wr.feedback.empty() && wr.feedback.find("No goal") != std::string::npos)
+      {
+        result->res_msg = "No such goal";
+        goal_handle->abort(result);
+        return;
+      }
+
+      if (wr.complete)
+      {
+        feedback->feed_msg = wr.feedback;
+        goal_handle->publish_feedback(feedback);
+        result->res_msg = wr.result;
+        goal_handle->succeed(result);
+        RCLCPP_INFO(this->get_logger(), "action_server: %s", result->res_msg.c_str());
+        return;
+      }
+      else if (!wr.feedback.empty())
+      {
+        auto pr = parser.process_arcl_server(wr.feedback);
+        feedback->feed_msg = pr.message;
+        goal_handle->publish_feedback(feedback);
+
+        if (pr.code == Parser::Code::PASS)
+        {
+          result->res_msg = pr.message;
+          goal_handle->succeed(result);
+          return;
+        }
+        else if (pr.code == Parser::Code::FAIL)
+        {
+          result->res_msg = pr.message;
+          goal_handle->abort(result);
+          return;
+        }
+      }
+
+      if (std::chrono::steady_clock::now() - start > std::chrono::minutes(10))
+      {
+        result->res_msg = "Timeout";
+        goal_handle->abort(result);
+        return;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // Check if goal is done
-    if (rclcpp::ok())
+    if (goal_handle->is_active())
     {
-      result->sequence = sequence;
-      goal_handle->succeed(result);
-      RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+      result->res_msg = "Node shutdown";
+      goal_handle->abort(result);
     }
   }
-};  // class FibonacciActionServer
 
-}  // namespace amr
+  // -------- Publisher (SocketListener -> topics) --------
+  void on_pub_timer()
+  {
+    try
+    {
+      while (listener_ && listener_->poll_once(0))
+      {
+      }
+    }
+    catch (const amr_exception& ex)
+    {
+      RCLCPP_ERROR(this->get_logger(), "Listener error: %s", ex.what());
+    }
+
+    pub_status();
+    pub_laser();
+    pub_goals();
+    pub_odometer();
+    pub_app_fault_query();
+    pub_faults_get();
+    pub_query_faults();
+  }
+
+  void pub_status()
+  {
+    amr_msgs::msg::Status status_msg;
+    amr_msgs::msg::Location loc_msg;
+
+    try
+    {
+      const auto& status_status = listener_->get_response("Status");
+      const auto& status_batt = listener_->get_response("StateOfCharge");
+      const auto& status_loc = listener_->get_response("Location");
+      const auto& status_loc_sc = listener_->get_response("LocalizationScore");
+      const auto& status_temp = listener_->get_response("Temperature");
+      const auto& status_ext = listener_->get_response("ExtendedStatusForHumans");
+
+      status_msg.status = status_status.front();
+      status_msg.extended_status = status_ext.front();
+      status_msg.state_of_charge = std::stof(status_batt.front());
+      status_msg.localization_score = std::stof(status_loc_sc.front());
+      status_msg.temperature = std::stof(status_temp.front());
+
+      std::istringstream iss(status_loc.front());
+      double x = 0.0, y = 0.0, th = 0.0;
+      if (iss >> x >> y >> th)
+      {
+        loc_msg.x = x;
+        loc_msg.y = y;
+        loc_msg.theta = th;
+        status_msg.location = loc_msg;
+      }
+      else
+      {
+        RCLCPP_WARN(this->get_logger(), "Value error with location coordinates. Using zeros.");
+      }
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+    catch (const std::exception& ex)
+    {
+      RCLCPP_WARN(this->get_logger(), "Status parse error: %s", ex.what());
+    }
+
+    if (status_pub_)
+      status_pub_->publish(status_msg);
+  }
+
+  void pub_laser()
+  {
+    try
+    {
+      const auto& scans = listener_->get_response("RangeDeviceGetCurrent");
+      std_msgs::msg::String msg;
+      msg.data = scans.front();
+      if (laser_pub_)
+        laser_pub_->publish(msg);
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+  }
+
+  void pub_goals()
+  {
+    try
+    {
+      const auto& goals = listener_->get_response("Goal");
+      std::string joined;
+      for (size_t i = 0; i < goals.size(); ++i)
+      {
+        if (i)
+          joined += ' ';
+        joined += goals[i];
+      }
+      std_msgs::msg::String msg;
+      msg.data = joined;
+      if (goals_pub_)
+        goals_pub_->publish(msg);
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+  }
+
+  void pub_odometer()
+  {
+    try
+    {
+      const auto& odom = listener_->get_response("Odometer");
+      std::string joined;
+      for (size_t i = 0; i < odom.size(); ++i)
+      {
+        if (i)
+          joined += ' ';
+        joined += odom[i];
+      }
+      std_msgs::msg::String msg;
+      msg.data = joined;
+      if (odom_pub_)
+        odom_pub_->publish(msg);
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+  }
+
+  void pub_app_fault_query()
+  {
+    try
+    {
+      const auto& query = listener_->get_response("ApplicationFaultQuery");
+      std::string joined;
+      for (size_t i = 0; i < query.size(); ++i)
+      {
+        if (i)
+          joined += ' ';
+        joined += query[i];
+      }
+      std_msgs::msg::String msg;
+      msg.data = joined;
+      if (app_fault_query_pub_)
+        app_fault_query_pub_->publish(msg);
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+  }
+
+  void pub_faults_get()
+  {
+    try
+    {
+      const auto& faults = listener_->get_response("FaultList");
+      std::string joined;
+      for (size_t i = 0; i < faults.size(); ++i)
+      {
+        if (i)
+          joined += ' ';
+        joined += faults[i];
+      }
+      std_msgs::msg::String msg;
+      msg.data = joined;
+      if (faults_get_pub_)
+        faults_get_pub_->publish(msg);
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+  }
+
+  void pub_query_faults()
+  {
+    try
+    {
+      const auto& faults = listener_->get_response("RobotFaultQuery");
+      std::string joined;
+      for (size_t i = 0; i < faults.size(); ++i)
+      {
+        if (i)
+          joined += ' ';
+        joined += faults[i];
+      }
+      std_msgs::msg::String msg;
+      msg.data = joined;
+      if (query_faults_pub_)
+        query_faults_pub_->publish(msg);
+    }
+    catch (const std::out_of_range&)
+    {
+    }
+  }
+
+private:
+  // Params
+  std::string ip_;
+  int port_{ 0 };
+  std::string passwd_;
+  int svc_timeout_ms_{ 15000 };
+
+  std::string pub_ip_;
+  int pub_port_{ 0 };
+
+  bool enable_pub_{ true };
+  bool enable_service_{ true };
+  bool enable_action_{ true };
+
+  // Service (driver)
+  std::shared_ptr<SocketDriver> drv_;
+  rclcpp::Service<ServiceT>::SharedPtr srv_;
+
+  // Action (taskmaster)
+  std::shared_ptr<SocketTaskmaster> tm_;
+  rclcpp_action::Server<ActionT>::SharedPtr server_;
+
+  // Publisher (listener)
+  std::shared_ptr<SocketListener> listener_;
+  rclcpp::TimerBase::SharedPtr pub_timer_;
+
+  // Init deferral
+  rclcpp::TimerBase::SharedPtr init_timer_;
+
+  // Pubs
+  rclcpp::Publisher<amr_msgs::msg::Status>::SharedPtr status_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr laser_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr goals_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr odom_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr app_fault_query_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr faults_get_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr query_faults_pub_;
+};

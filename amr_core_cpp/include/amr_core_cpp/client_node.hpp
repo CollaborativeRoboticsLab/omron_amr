@@ -13,13 +13,13 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <amr_msgs/action/action.hpp>
 
-class UnifiedAmrActionClient : public rclcpp::Node {
+class ClientNode : public rclcpp::Node {
 public:
   using ActionT = amr_msgs::action::Action;
   using ClientT = rclcpp_action::Client<ActionT>;
   using GoalHandle = rclcpp_action::ClientGoalHandle<ActionT>;
 
-  UnifiedAmrActionClient()
+  ClientNode()
   : rclcpp::Node("amr_unified_action_client")
   {
     // Parameters
@@ -40,14 +40,14 @@ public:
       auto topic = get_param<std::string>("goal_pose_topic");
       goal_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
           topic, rclcpp::QoS(10),
-          std::bind(&UnifiedAmrActionClient::on_goal_pose, this, std::placeholders::_1));
+          std::bind(&ClientNode::on_goal_pose, this, std::placeholders::_1));
       RCLCPP_INFO(this->get_logger(), "Subscribed to goal pose: %s", topic.c_str());
     }
     if (get_param<bool>("enable_initialpose_sub")) {
       auto topic = get_param<std::string>("initialpose_topic");
       initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
           topic, rclcpp::QoS(10),
-          std::bind(&UnifiedAmrActionClient::on_initial_pose, this, std::placeholders::_1));
+          std::bind(&ClientNode::on_initial_pose, this, std::placeholders::_1));
       RCLCPP_INFO(this->get_logger(), "Subscribed to initial pose: %s", topic.c_str());
     }
 
