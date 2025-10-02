@@ -4,7 +4,8 @@ To view the original Readme.md [click here](./docs/original_readme.md)
 
 This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com/OmronAPAC/Omron_AMR_ROS2)
 
-View [Developer's Guide](https://github.com/guanyewtan/Omron_LD/blob/master/docs/DeveloperGuide.adoc).
+View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_base/blob/master/docs/DeveloperGuide_updated.adoc).
+View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_base/blob/master/docs/DeveloperGuide.adoc).
 
 ## Setup
 
@@ -37,9 +38,7 @@ colcon build
 
 ### Initialization
 
-1. [Startup TMFLow software with a listener node](https://github.com/CollaborativeRoboticsLab/tmr_ros2?tab=readme-ov-file#-tmflow-listen-node-setup)
-
-2. [Establish Remote connection to TM Robot](https://github.com/CollaborativeRoboticsLab/tmr_ros2?tab=readme-ov-file#-remote-connection-to-tm-robot)
+1. [Establish Remote connection to TM Robot](https://github.com/CollaborativeRoboticsLab/tmr_ros2?tab=readme-ov-file#-remote-connection-to-tm-robot)
 
 3. Once the robot starts up, it needs to have the listner node loaded (via TMFlow) and should be in the auto mode. On the arm it needs to flash blue and red, while on the pendent a blue light should appear near letter A.
 
@@ -51,7 +50,7 @@ Run the following command to visualize robot. Swap `ld250` with `ld90` or `amr_p
 
 ```sh
 source install/setup.bash
-ros2 launch amr_description ld250.launch.py
+ros2 launch amr_ros amr_visualize.launch.py
 ```
 
 ### Connect with the robot base
@@ -99,4 +98,10 @@ ros2 launch tm12x_moveit_config tm12x_run_move_group.launch.py
     source install/setup.bash
     ros2 launch tm12x_moveit_config tm12x_run_move_group_visualize.launch.py
     ```
+
+## To Do List
+
+- [ ] Replace AMR_Core with a cpp package with support for standard ros2 interface (/cmd_vel, /tf and /odom)
+- [ ] Add support for NAV2
+- [ ] Create cascadeing launch files for AMR core and RVIz
 
