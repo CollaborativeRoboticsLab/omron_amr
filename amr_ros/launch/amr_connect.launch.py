@@ -25,7 +25,7 @@ def generate_launch_description():
         #name='ld_states_publi',
         output='screen',
         parameters=[{
-            'local_ip': "192.168.1.1",
+            'local_ip': "192.168.1.50",
             'local_port': 7179
         }]
     )
