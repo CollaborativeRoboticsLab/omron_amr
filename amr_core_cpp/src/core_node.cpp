@@ -1,5 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
-#include "amr_core_cpp/core_node.hpp"
+#include "amr_core_cpp/core_node_extended.hpp"
 
 int main(int argc, char** argv)
 {
