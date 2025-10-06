@@ -15,7 +15,7 @@
 #include <amr_msgs/srv/arcl_api.hpp>
 #include <amr_msgs/action/action.hpp>
 
-#include "amr_core_cpp/socket_listener.hpp"
+#include "amr_core_cpp/socket/socket_listener.hpp"
 #include "amr_core_cpp/socket/socket_driver.hpp"
 #include "amr_core_cpp/socket/socket_taskmaster.hpp"
 #include "amr_core_cpp/utils/parser.hpp"
@@ -42,22 +42,13 @@ public:
     pub_ip_ = this->declare_parameter<std::string>("local_ip", ip_);
     pub_port_ = this->declare_parameter<int>("local_port", port_);
 
-    // Feature toggles
-    enable_pub_ = this->declare_parameter<bool>("enable_publisher", true);
-    enable_service_ = this->declare_parameter<bool>("enable_service", true);
-    enable_action_ = this->declare_parameter<bool>("enable_action", true);
-
-    // Create publishers if enabled
-    if (enable_pub_)
-    {
-      status_pub_ = this->create_publisher<amr_msgs::msg::Status>("ldarcl_status", 10);
-      laser_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_laser", 10);
-      goals_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_all_goals", 10);
-      odom_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_odom", 10);
-      app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_application_fault_query", 10);
-      faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_faults_get", 10);
-      query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_query_faults", 10);
-    }
+    status_pub_ = this->create_publisher<amr_msgs::msg::Status>("ldarcl_status", 10);
+    laser_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_laser", 10);
+    goals_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_all_goals", 10);
+    odom_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_odom", 10);
+    app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_application_fault_query", 10);
+    faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_faults_get", 10);
+    query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_query_faults", 10);
 
     // Defer initialization (requires shared_from_this)
     init_timer_ = this->create_wall_timer(0ms, [this]() {
@@ -71,66 +62,57 @@ private:
   {
     using namespace std::chrono_literals;
 
-    // Service: SocketDriver (low-level, mirrors Python arcl_api_service)
-    if (enable_service_)
+    // Srvice: SocketDriver (low-level)
+    try
     {
-      try
-      {
-        drv_ = std::make_shared<SocketDriver>(this->shared_from_this());
-        (void)drv_->connect(ip_, static_cast<uint16_t>(port_));
-        login_with_driver(passwd_);
-        srv_ = this->create_service<ServiceT>("arcl_api_service",
-                                              std::bind(&CoreNode::handle_service, this, std::placeholders::_1,
-                                                        std::placeholders::_2, std::placeholders::_3));
-        RCLCPP_INFO(this->get_logger(), "ARCL API Service ready @ %s:%d", ip_.c_str(), port_);
-      }
-      catch (const amr_exception& ex)
-      {
-        RCLCPP_FATAL(this->get_logger(), "SocketDriver init failed: %s", ex.what());
-      }
+      driver_ = std::make_shared<SocketDriver>(this->shared_from_this());
+      (void)driver_->connect(ip_, static_cast<uint16_t>(port_));
+      login_with_driver(passwd_);
+      srv_ = this->create_service<ServiceT>("arcl_api_service",
+                                            std::bind(&CoreNode::handle_service, this, std::placeholders::_1,
+                                                      std::placeholders::_2, std::placeholders::_3));
+      RCLCPP_INFO(this->get_logger(), "ARCL API Service ready @ %s:%d", ip_.c_str(), port_);
+    }
+    catch (const amr_exception& ex)
+    {
+      RCLCPP_FATAL(this->get_logger(), "SocketDriver init failed: %s", ex.what());
     }
 
     // Action server: SocketTaskmaster (high-level)
-    if (enable_action_)
+    try
     {
-      try
-      {
-        tm_ = std::make_shared<SocketTaskmaster>(this->shared_from_this());
-        (void)tm_->connect(ip_, port_);
-        tm_->login(passwd_);
-        server_ = rclcpp_action::create_server<ActionT>(
-            this->shared_from_this(), "action_server",
-            std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
-            std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
-        RCLCPP_INFO(this->get_logger(), "Action server is up @ %s:%d", ip_.c_str(), port_);
-      }
-      catch (const amr_exception& ex)
-      {
-        RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster init failed: %s", ex.what());
-      }
+      task_master_ = std::make_shared<SocketTaskmaster>(this->shared_from_this());
+      (void)task_master_->connect(ip_, port_);
+      task_master_->login(passwd_);
+      server_ = rclcpp_action::create_server<ActionT>(
+          this->shared_from_this(), "action_server",
+          std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+          std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
+          std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
+      RCLCPP_INFO(this->get_logger(), "Action server is up @ %s:%d", ip_.c_str(), port_);
+    }
+    catch (const amr_exception& ex)
+    {
+      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster init failed: %s", ex.what());
     }
 
     // Publisher: SocketListener
-    if (enable_pub_)
+    try
     {
-      try
+      listener_ = std::make_shared<SocketListener>(this->shared_from_this(), pub_ip_, pub_port_);
+      if (!listener_->begin())
       {
-        listener_ = std::make_shared<SocketListener>(this->shared_from_this(), pub_ip_, pub_port_);
-        if (!listener_->begin())
-        {
-          RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
-        }
-        else
-        {
-          pub_timer_ = this->create_wall_timer(200ms, [this]() { on_pub_timer(); });
-          RCLCPP_INFO(this->get_logger(), "States publisher on %s:%d", pub_ip_.c_str(), pub_port_);
-        }
+        RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
       }
-      catch (const amr_exception& ex)
+      else
       {
-        RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
+        pub_timer_ = this->create_wall_timer(200ms, [this]() { on_pub_timer(); });
+        RCLCPP_INFO(this->get_logger(), "States publisher on %s:%d", pub_ip_.c_str(), pub_port_);
       }
+    }
+    catch (const amr_exception& ex)
+    {
+      RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
     }
   }
 
@@ -138,14 +120,14 @@ private:
   void login_with_driver(const std::string& passwd)
   {
     using namespace std::chrono_literals;
-    drv_->send_line(passwd);
+    driver_->send_line(passwd);
     auto start = std::chrono::steady_clock::now();
     std::vector<std::string> lines;
     for (;;)
     {
-      drv_->poll_once(100);
+      driver_->poll_once(100);
       lines.clear();
-      drv_->read_lines(lines);
+      driver_->read_lines(lines);
       for (const auto& ln : lines)
       {
         if (ln.find("End of commands") != std::string::npos)
@@ -161,62 +143,25 @@ private:
   void handle_service(const std::shared_ptr<rmw_request_id_t>&, const std::shared_ptr<ServiceT::Request> req,
                       std::shared_ptr<ServiceT::Response> resp)
   {
-    if (!drv_)
+    if (!driver_)
     {
       resp->response = "ERROR: driver not available";
       return;
     }
 
-    try
+    // Delegate queueing and response handling to SocketDriver
+    int req_id = driver_->queue_command(req->command, req->line_identifier);
+    std::string response;
+    bool got_response = driver_->wait_for_response(req_id, response, svc_timeout_ms_);
+
+    if (got_response)
     {
-      drv_->send_line(req->command);
+      resp->response = response;
     }
-    catch (const amr_exception& ex)
+    else
     {
-      RCLCPP_ERROR(this->get_logger(), "send_line failed: %s", ex.what());
-      resp->response = std::string("ERROR: ") + ex.what();
-      return;
+      resp->response = "TIMEOUT";
     }
-
-    std::vector<std::string> end_lines(req->line_identifier.begin(), req->line_identifier.end());
-    auto start = std::chrono::steady_clock::now();
-    std::vector<std::string> lines;
-
-    while (rclcpp::ok())
-    {
-      try
-      {
-        drv_->poll_once(100);
-      }
-      catch (const amr_exception& ex)
-      {
-        RCLCPP_ERROR(this->get_logger(), "poll_once error: %s", ex.what());
-        resp->response = std::string("ERROR: ") + ex.what();
-        return;
-      }
-
-      lines.clear();
-      drv_->read_lines(lines);
-      for (const auto& ln : lines)
-      {
-        for (const auto& id : end_lines)
-        {
-          if (!id.empty() && ln.find(id) != std::string::npos)
-          {
-            resp->response = ln;
-            return;
-          }
-        }
-      }
-
-      if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(svc_timeout_ms_))
-      {
-        RCLCPP_WARN(this->get_logger(), "Service timeout after %d ms", svc_timeout_ms_);
-        resp->response = "TIMEOUT";
-        return;
-      }
-    }
-    resp->response = "SHUTDOWN";
   }
 
   // -------- Action server (SocketTaskmaster) --------
@@ -237,7 +182,7 @@ private:
 
   void execute(const std::shared_ptr<GoalHandle> goal_handle)
   {
-    if (!tm_)
+    if (!task_master_)
     {
       auto result = std::make_shared<ActionT::Result>();
       result->res_msg = "Taskmaster unavailable";
@@ -254,7 +199,7 @@ private:
 
     try
     {
-      tm_->push_command(goal->command, true, end_lines);
+      task_master_->push_command(goal->command, true, end_lines);
     }
     catch (const amr_exception& ex)
     {
@@ -280,7 +225,7 @@ private:
       SocketTaskmaster::WaitResult wr{ false, "", "" };
       try
       {
-        wr = tm_->wait_command(100);
+        wr = task_master_->wait_command(100);
       }
       catch (const amr_exception& ex)
       {
@@ -550,11 +495,11 @@ private:
   bool enable_action_{ true };
 
   // Service (driver)
-  std::shared_ptr<SocketDriver> drv_;
+  std::shared_ptr<SocketDriver> driver_;
   rclcpp::Service<ServiceT>::SharedPtr srv_;
 
   // Action (taskmaster)
-  std::shared_ptr<SocketTaskmaster> tm_;
+  std::shared_ptr<SocketTaskmaster> task_master_;
   rclcpp_action::Server<ActionT>::SharedPtr server_;
 
   // Publisher (listener)

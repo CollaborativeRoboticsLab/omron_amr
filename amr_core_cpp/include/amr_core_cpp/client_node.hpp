@@ -131,10 +131,12 @@ private:
     }
 
     auto options = typename ClientT::SendGoalOptions();
+
     options.feedback_callback =
         [this](GoalHandle::SharedPtr, const std::shared_ptr<const ActionT::Feedback> feedback) {
           RCLCPP_INFO(this->get_logger(), "%s", feedback->feed_msg.c_str());
         };
+        
     options.result_callback =
         [this](const GoalHandle::WrappedResult& result) {
           switch (result.code) {
@@ -156,15 +158,16 @@ private:
           }
         };
 
-    ac_->async_send_goal(goal, options).then(
-        [this](std::shared_future<GoalHandle::SharedPtr> f) {
-          auto gh = f.get();
-          if (!gh || !gh->is_active()) {
-            RCLCPP_WARN(this->get_logger(), "Goal Rejected!");
+    options.goal_response_callback =
+        [this](const GoalHandle::SharedPtr& goal_handle) {
+          if (!goal_handle) {
+            RCLCPP_ERROR(this->get_logger(), "Goal was rejected by server");
           } else {
-            RCLCPP_INFO(this->get_logger(), "Goal sent");
+            RCLCPP_INFO(this->get_logger(), "Goal accepted by server, waiting for result");
           }
-        });
+        };
+
+    ac_->async_send_goal(goal, options);
   }
 
   // ========== Math ==========

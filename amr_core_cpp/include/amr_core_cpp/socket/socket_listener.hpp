@@ -18,7 +18,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "amr_core_cpp/utils/amr_exception.hpp"
-#include "amr_core_cpp/utils/socket_common.hpp"
+#include "amr_core_cpp/socket/socket_common.hpp"
 
 class SocketListener
 {

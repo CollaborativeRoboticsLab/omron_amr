@@ -9,8 +9,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "amr_core_cpp/utils/socket_driver.hpp"
-#include "amr_core_cpp/amr_exception.hpp"
+#include "amr_core_cpp/socket/socket_driver.hpp"
+#include "amr_core_cpp/utils/amr_exception.hpp"
 
 using namespace std::chrono_literals;
 

@@ -5,6 +5,11 @@
 #include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <mutex>
+#include <condition_variable>
+#include <unordered_map>
+#include <memory>
+#include <queue>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -15,7 +20,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include "amr_core_cpp/utils/amr_exception.hpp"
-#include "amr_core_cpp/utils/socket_common.hpp"
+#include "amr_core_cpp/socket/socket_common.hpp"
 
 /**
  * @brief Non-blocking TCP socket driver for simple client/server use.
@@ -38,6 +43,15 @@ public:
     None,
     Client,
     Server
+  };
+
+  struct CommandEntry
+  {
+    int id;
+    std::string command;
+    std::string line_identifier;
+    std::string response;
+    bool done{ false };
   };
 
   /**
@@ -321,6 +335,44 @@ public:
     return mode_;
   }
 
+  // --- ARCL API Service Command Queue ---
+  int queue_command(const std::string& command, const std::string& line_identifier)
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    int id = next_id_++;
+    auto entry = std::make_shared<CommandEntry>();
+    entry->id = id;
+    entry->command = command;
+    entry->line_identifier = line_identifier;
+    command_map_[id] = entry;
+    command_queue_.push(entry);
+    return id;
+  }
+
+  bool wait_for_response(int id, std::string& response, int timeout_ms)
+  {
+    auto start = std::chrono::steady_clock::now();
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    while (true)
+    {
+      if (command_map_.count(id) && command_map_[id]->done)
+      {
+        response = command_map_[id]->response;
+        command_map_.erase(id);
+        return true;
+      }
+      lock.unlock();
+      poll_and_process();
+      lock.lock();
+      auto now = std::chrono::steady_clock::now();
+      if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() > timeout_ms)
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    command_map_.erase(id);
+    return false;
+  }
+
 private:
   void read_ready()
   {
@@ -342,6 +394,45 @@ private:
     (void)amr::net::send_erase_nb(sock_fd_, send_buf_);
   }
 
+  
+  void poll_and_process()
+  {
+    // Send next command if available
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      if (!command_queue_.empty())
+      {
+        auto entry = command_queue_.front();
+        send_line(entry->command);
+        command_queue_.pop();
+      }
+    }
+
+    // Poll socket and process events
+    poll_once(20);
+
+    // Read lines and match responses
+    std::vector<std::string> lines;
+    read_lines(lines);
+
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    for (auto& [id, entry] : command_map_)
+    {
+      if (!entry->done)
+      {
+        for (const auto& line : lines)
+        {
+          if (line.find(entry->line_identifier) != std::string::npos)
+          {
+            entry->response = line;
+            entry->done = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
 private:
   rclcpp::Node::SharedPtr node_;
   Mode mode_{ Mode::None };
@@ -351,4 +442,10 @@ private:
 
   std::string recv_buf_;
   std::string send_buf_;
+
+  // --- ARCL API Service Command Queue ---
+  std::mutex queue_mutex_;
+  std::unordered_map<int, std::shared_ptr<CommandEntry>> command_map_;
+  std::queue<std::shared_ptr<CommandEntry>> command_queue_;
+  int next_id_{ 1 };
 };
