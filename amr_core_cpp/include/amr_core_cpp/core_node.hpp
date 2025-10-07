@@ -21,6 +21,8 @@
 #include "amr_core_cpp/utils/parser.hpp"
 #include "amr_core_cpp/utils/amr_exception.hpp"
 
+using namespace std::chrono_literals;
+
 class CoreNode : public rclcpp::Node
 {
 public:
@@ -30,44 +32,37 @@ public:
 
   CoreNode() : rclcpp::Node("core_node")
   {
-    using namespace std::chrono_literals;
+  }
 
+  void initialize()
+  {
     // Shared connection params (service + action)
-    ip_ = this->declare_parameter<std::string>("ip_address", "127.0.0.1");
-    port_ = this->declare_parameter<int>("port", 0);
-    passwd_ = this->declare_parameter<std::string>("def_arcl_passwd", "");
+    ip_ = this->declare_parameter<std::string>("robot_ip", "127.0.0.1");
+    port_ = this->declare_parameter<int>("robot_port", 0);
+    passwd_ = this->declare_parameter<std::string>("robot_password", "");
     svc_timeout_ms_ = this->declare_parameter<int>("service_timeout_ms", 15000);
 
     // Publisher (listener) endpoint (defaults to same ip/port if not set)
-    pub_ip_ = this->declare_parameter<std::string>("local_ip", ip_);
-    pub_port_ = this->declare_parameter<int>("local_port", port_);
+    host_ip_ = this->declare_parameter<std::string>("host_ip", ip_);
+    host_port_ = this->declare_parameter<int>("host_port", port_);
+    publisher_frequency_ = this->declare_parameter<int>("publisher_frequency", 5);
 
-    status_pub_ = this->create_publisher<amr_msgs::msg::Status>("ldarcl_status", 10);
-    laser_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_laser", 10);
-    goals_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_all_goals", 10);
-    odom_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_odom", 10);
-    app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_application_fault_query", 10);
-    faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_faults_get", 10);
-    query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("ldarcl_query_faults", 10);
+    pub_interval_ms_ = int(1000 / publisher_frequency_);
 
-    // Defer initialization (requires shared_from_this)
-    init_timer_ = this->create_wall_timer(0ms, [this]() {
-      init_timer_->cancel();
-      init_components();
-    });
-  }
-
-private:
-  void init_components()
-  {
-    using namespace std::chrono_literals;
+    status_pub_ = this->create_publisher<amr_msgs::msg::Status>("amr/status", 10);
+    laser_pub_ = this->create_publisher<std_msgs::msg::String>("amr/laser", 10);
+    goals_pub_ = this->create_publisher<std_msgs::msg::String>("amr/all_goals", 10);
+    odom_pub_ = this->create_publisher<std_msgs::msg::String>("amr/odom", 10);
+    app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("amr/application_fault_query", 10);
+    faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/faults_get", 10);
+    query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/query_faults", 10);
 
     // Srvice: SocketDriver (low-level)
     try
     {
       driver_ = std::make_shared<SocketDriver>(this->shared_from_this());
       (void)driver_->connect(ip_, static_cast<uint16_t>(port_));
-      login_with_driver(passwd_);
+      driver_->login(passwd_);
       srv_ = this->create_service<ServiceT>("arcl_api_service",
                                             std::bind(&CoreNode::handle_service, this, std::placeholders::_1,
                                                       std::placeholders::_2, std::placeholders::_3));
@@ -99,15 +94,15 @@ private:
     // Publisher: SocketListener
     try
     {
-      listener_ = std::make_shared<SocketListener>(this->shared_from_this(), pub_ip_, pub_port_);
+      listener_ = std::make_shared<SocketListener>(this->shared_from_this(), host_ip_, host_port_);
       if (!listener_->begin())
       {
         RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
       }
       else
       {
-        pub_timer_ = this->create_wall_timer(200ms, [this]() { on_pub_timer(); });
-        RCLCPP_INFO(this->get_logger(), "States publisher on %s:%d", pub_ip_.c_str(), pub_port_);
+        pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
+        RCLCPP_INFO(this->get_logger(), "States publisher on %s:%d", host_ip_.c_str(), host_port_);
       }
     }
     catch (const amr_exception& ex)
@@ -116,29 +111,7 @@ private:
     }
   }
 
-  // -------- Service (ARCL API via SocketDriver) --------
-  void login_with_driver(const std::string& passwd)
-  {
-    using namespace std::chrono_literals;
-    driver_->send_line(passwd);
-    auto start = std::chrono::steady_clock::now();
-    std::vector<std::string> lines;
-    for (;;)
-    {
-      driver_->poll_once(100);
-      lines.clear();
-      driver_->read_lines(lines);
-      for (const auto& ln : lines)
-      {
-        if (ln.find("End of commands") != std::string::npos)
-          return;
-      }
-      if (std::chrono::steady_clock::now() - start > std::chrono::seconds(15))
-      {
-        throw amr_exception("Login timeout");
-      }
-    }
-  }
+private:
 
   void handle_service(const std::shared_ptr<rmw_request_id_t>&, const std::shared_ptr<ServiceT::Request> req,
                       std::shared_ptr<ServiceT::Response> resp)
@@ -486,9 +459,11 @@ private:
   int port_{ 0 };
   std::string passwd_;
   int svc_timeout_ms_{ 15000 };
+  int publisher_frequency_{ 5 };
+  int pub_interval_ms_{ 200 };
 
-  std::string pub_ip_;
-  int pub_port_{ 0 };
+  std::string host_ip_;
+  int host_port_{ 0 };
 
   bool enable_pub_{ true };
   bool enable_service_{ true };

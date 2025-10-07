@@ -16,7 +16,7 @@ class AmrActionClient(Node):
     def send_goal(self, name):
         self._action_client.wait_for_server()
         self.goal = Action.Goal()
-        self.goal.command = "dock"
+        self.goal.command = "undock"
         self.goal.identifier = ["Arrived at dock"]
         self._send_goal_future = self._action_client.send_goal_async(self.goal, feedback_callback=self.feedback_callback)
         self._send_goal_future.add_done_callback(self.goal_response_callback)
@@ -44,7 +44,7 @@ class AmrActionClient(Node):
 def main(args=None):
     rclpy.init(args=args)
     action_client = AmrActionClient()
-    action_client.send_goal('dock')
+    action_client.send_goal('undock')
     rclpy.spin(action_client)
 
 

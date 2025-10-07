@@ -71,6 +71,40 @@ public:
   }
 
   /**
+   * @brief Handle readiness flags from poll().
+   * @param revents Returned event mask.
+   * @throws amr_exception on socket error conditions.
+   */
+  void process_events(short revents)
+  {
+    if (revents & (POLLERR | POLLHUP | POLLNVAL))
+    {
+      int soerr = amr::net::get_so_error(sock_fd_);
+      std::string msg = "socket error: " + std::string(std::strerror(soerr));
+      close();
+      throw amr_exception(msg);
+    }
+
+    if (connecting_ && (revents & POLLOUT))
+    {
+      int soerr = amr::net::get_so_error(sock_fd_);
+      if (soerr != 0)
+      {
+        std::string msg = "connect completion error: " + std::string(std::strerror(soerr));
+        close();
+        throw amr_exception(msg);
+      }
+      connecting_ = false;
+      RCLCPP_INFO(node_->get_logger(), "Connect completed");
+    }
+
+    if (revents & POLLIN)
+      read_ready();
+    if (revents & POLLOUT)
+      write_ready();
+  }
+
+  /**
    * @brief Initiate a non-blocking client connection to addr:port (IPv4).
    * @param addr Dotted-quad IP (e.g., "127.0.0.1").
    * @param port TCP port.
@@ -121,6 +155,28 @@ public:
     int err = errno;
     close();
     throw amr_exception(std::string("connect() failed: ") + std::strerror(err));
+  }
+
+  void login(const std::string& passwd)
+  {
+    send_line(passwd);
+    auto start = std::chrono::steady_clock::now();
+    std::vector<std::string> lines;
+    for (;;)
+    {
+      poll_once(100);
+      lines.clear();
+      read_lines(lines);
+      for (const auto& ln : lines)
+      {
+        if (ln.find("End of commands") != std::string::npos)
+          return;
+      }
+      if (std::chrono::steady_clock::now() - start > std::chrono::seconds(15))
+      {
+        throw amr_exception("Login timeout");
+      }
+    }
   }
 
   /**
@@ -234,40 +290,6 @@ public:
   }
 
   /**
-   * @brief Handle readiness flags from poll().
-   * @param revents Returned event mask.
-   * @throws amr_exception on socket error conditions.
-   */
-  void process_events(short revents)
-  {
-    if (revents & (POLLERR | POLLHUP | POLLNVAL))
-    {
-      int soerr = amr::net::get_so_error(sock_fd_);
-      std::string msg = "socket error: " + std::string(std::strerror(soerr));
-      close();
-      throw amr_exception(msg);
-    }
-
-    if (connecting_ && (revents & POLLOUT))
-    {
-      int soerr = amr::net::get_so_error(sock_fd_);
-      if (soerr != 0)
-      {
-        std::string msg = "connect completion error: " + std::string(std::strerror(soerr));
-        close();
-        throw amr_exception(msg);
-      }
-      connecting_ = false;
-      RCLCPP_INFO(node_->get_logger(), "Connect completed");
-    }
-
-    if (revents & POLLIN)
-      read_ready();
-    if (revents & POLLOUT)
-      write_ready();
-  }
-
-  /**
    * @brief Queue raw bytes for sending.
    * @param data Pointer to bytes.
    * @param len Number of bytes.
@@ -336,17 +358,29 @@ public:
   }
 
   // --- ARCL API Service Command Queue ---
-  int queue_command(const std::string& command, const std::string& line_identifier)
+  int queue_command(const std::string& command, const std::string& line_identifier, bool newline = true)
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
-    int id = next_id_++;
+
+    int current_id = 0;
+    for (const auto& id : id_tracker_)
+    {
+      if (current_id == id)
+        current_id += 1;
+      else
+        break;
+    }
+
+    id_tracker_.push_back(current_id);
+    std::sort(id_tracker_.begin(), id_tracker_.end());
+
     auto entry = std::make_shared<CommandEntry>();
-    entry->id = id;
+    entry->id = current_id;
     entry->command = command;
     entry->line_identifier = line_identifier;
-    command_map_[id] = entry;
+    command_map_[current_id] = entry;
     command_queue_.push(entry);
-    return id;
+    return current_id;
   }
 
   bool wait_for_response(int id, std::string& response, int timeout_ms)
@@ -394,7 +428,6 @@ private:
     (void)amr::net::send_erase_nb(sock_fd_, send_buf_);
   }
 
-  
   void poll_and_process()
   {
     // Send next command if available
@@ -445,6 +478,7 @@ private:
 
   // --- ARCL API Service Command Queue ---
   std::mutex queue_mutex_;
+  std::vector<int> id_tracker_;
   std::unordered_map<int, std::shared_ptr<CommandEntry>> command_map_;
   std::queue<std::shared_ptr<CommandEntry>> command_queue_;
   int next_id_{ 1 };

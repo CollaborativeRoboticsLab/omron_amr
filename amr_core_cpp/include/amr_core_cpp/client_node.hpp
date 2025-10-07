@@ -19,15 +19,24 @@ public:
   using ClientT = rclcpp_action::Client<ActionT>;
   using GoalHandle = rclcpp_action::ClientGoalHandle<ActionT>;
 
+  /**
+   * @brief constructor
+   */
   ClientNode()
   : rclcpp::Node("amr_unified_action_client")
+  {}
+
+  /**
+   * 
+   */
+  void initialize()
   {
     // Parameters
     this->declare_parameter<bool>("enable_goal_pose_sub", false);
     this->declare_parameter<bool>("enable_initialpose_sub", false);
     this->declare_parameter<std::string>("goal_pose_topic", "goal_pose");
     this->declare_parameter<std::string>("initialpose_topic", "initialpose");
-    this->declare_parameter<std::string>("command_type", "none");  // none|goto_goal|execute_macro|dock
+    this->declare_parameter<std::string>("command_type", "undock");  // none|goto_goal|execute_macro|dock|undock
     this->declare_parameter<std::string>("goal_name", "Goal1");
     this->declare_parameter<std::string>("macro_name", "Macro1");
     this->declare_parameter<bool>("exit_on_result", false);
@@ -43,6 +52,7 @@ public:
           std::bind(&ClientNode::on_goal_pose, this, std::placeholders::_1));
       RCLCPP_INFO(this->get_logger(), "Subscribed to goal pose: %s", topic.c_str());
     }
+    
     if (get_param<bool>("enable_initialpose_sub")) {
       auto topic = get_param<std::string>("initialpose_topic");
       initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
@@ -62,6 +72,8 @@ public:
         execute_macro(get_param<std::string>("macro_name"));
       } else if (cmd == "dock") {
         dock();
+      } else if (cmd == "undock") {
+        undock();
       }
     });
   }
@@ -86,6 +98,13 @@ private:
     ActionT::Goal goal;
     goal.command = "dock";
     goal.identifier = { "Arrived at dock" };
+    send_goal(goal);
+  }
+
+  void undock() {
+    ActionT::Goal goal;
+    goal.command = "undock";
+    goal.identifier = { "Stopped" };
     send_goal(goal);
   }
 
