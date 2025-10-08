@@ -14,8 +14,8 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-#include "amr_core_cpp/utils/amr_exception.hpp"
-#include "amr_core_cpp/socket/socket_common.hpp"
+#include "amr_core/utils/amr_exception.hpp"
+#include "amr_core/socket/socket_common.hpp"
 
 /**
  * @brief Non-blocking TCP client for ARCL-like command/response workflows.

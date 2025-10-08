@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(amr_core_cpp)
+project(amr_core)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -38,27 +38,9 @@ ament_target_dependencies(client
   geometry_msgs
 )
 
-add_executable(test_socket_driver src/test_socket_driver.cpp)
-ament_target_dependencies(test_socket_driver
-  rclcpp
-)
-
-add_executable(test_socket_listener src/test_socket_listener.cpp)
-ament_target_dependencies(test_socket_listener
-  rclcpp
-)
-
-add_executable(test_socket_taskmaster src/test_socket_taskmaster.cpp)
-ament_target_dependencies(test_socket_taskmaster
-  rclcpp
-)
-
 install(TARGETS
   ${PROJECT_NAME}
   client
-  test_socket_driver
-  test_socket_listener
-  test_socket_taskmaster
   DESTINATION lib/${PROJECT_NAME}
 )
 

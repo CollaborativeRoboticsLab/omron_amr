@@ -1,9 +1,10 @@
 #include <rclcpp/rclcpp.hpp>
-#include "amr_core_cpp/client_node.hpp"
+#include "amr_core/core_node.hpp"
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<ClientNode>();
+  auto node = std::make_shared<CoreNode>();
   node->initialize();
   rclcpp::spin(node);
   rclcpp::shutdown();

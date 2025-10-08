@@ -15,11 +15,11 @@
 #include <amr_msgs/srv/arcl_api.hpp>
 #include <amr_msgs/action/action.hpp>
 
-#include "amr_core_cpp/socket/socket_listener.hpp"
-#include "amr_core_cpp/socket/socket_driver.hpp"
-#include "amr_core_cpp/socket/socket_taskmaster.hpp"
-#include "amr_core_cpp/utils/parser.hpp"
-#include "amr_core_cpp/utils/amr_exception.hpp"
+#include "amr_core/socket/socket_listener.hpp"
+#include "amr_core/socket/socket_driver.hpp"
+#include "amr_core/socket/socket_taskmaster.hpp"
+#include "amr_core/utils/parser.hpp"
+#include "amr_core/utils/amr_exception.hpp"
 
 using namespace std::chrono_literals;
 
@@ -86,18 +86,18 @@ public:
     }
 
     // Publisher: SocketListener
-    try
-    {
-      listener_ = std::make_shared<SocketListener>(this->shared_from_this(), host_ip_, host_port_);
-      if (!listener_->begin())
-        RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
-      else
-        RCLCPP_INFO(this->get_logger(), "SocketListener started on %s:%d", host_ip_.c_str(), host_port_);
-    }
-    catch (const amr_exception& ex)
-    {
-      RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
-    }
+    // try
+    // {
+    //   listener_ = std::make_shared<SocketListener>(this->shared_from_this(), host_ip_, host_port_);
+    //   if (!listener_->begin())
+    //     RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
+    //   else
+    //     RCLCPP_INFO(this->get_logger(), "SocketListener started on %s:%d", host_ip_.c_str(), host_port_);
+    // }
+    // catch (const amr_exception& ex)
+    // {
+    //   RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
+    // }
 
     srv_ = this->create_service<ServiceARCL>(
         "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
@@ -108,7 +108,7 @@ public:
         std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
         std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
 
-    pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
+    // pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
 
     RCLCPP_INFO(this->get_logger(), "CoreNode initialized");
   }
@@ -281,6 +281,17 @@ private:
     pub_app_fault_query();
     pub_faults_get();
     pub_query_faults();
+
+    // Command -> status
+    // Response:
+    //
+    // ExtendedStatusForHumans: Robot lost
+    // Status: Teleop driving
+    // StateOfCharge: 79.4
+    // Location: 79031 -81597 20
+    // LocalizationScore: 0.170543
+    // Temperature: 36
+
   }
 
   void pub_status()
