@@ -166,7 +166,7 @@ public:
   void login(const std::string& passwd)
   {
     send_line(passwd, true);
-    wait_until_login()
+    wait_until_login();
   }
 
   /**

@@ -57,17 +57,6 @@ public:
     faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/faults_get", 10);
     query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/query_faults", 10);
 
-    srv_ = this->create_service<ServiceARCL>(
-        "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
-
-    action_ = rclcpp_action::create_server<ActionARCL>(
-        this->shared_from_this(), "action_server",
-        std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-        std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
-        std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
-
-    pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
-
     // Srvice: SocketDriver (low-level)
     try
     {
@@ -109,6 +98,19 @@ public:
     {
       RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
     }
+
+    srv_ = this->create_service<ServiceARCL>(
+        "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
+
+    action_ = rclcpp_action::create_server<ActionARCL>(
+        this->shared_from_this(), "action_server",
+        std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+        std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
+        std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
+
+    pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
+
+    RCLCPP_INFO(this->get_logger(), "CoreNode initialized");
   }
 
 private:
