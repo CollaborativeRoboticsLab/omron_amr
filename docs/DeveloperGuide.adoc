@@ -1,0 +1,571 @@
+= AMR-ROS2 - Developer Guide
+:site-section: DeveloperGuide
+:toc:
+:toclevels: 3
+:toc-title: Table of Contents
+:toc-placement: preamble
+:icons: font
+:sectnums:
+:imagesDir: dg-images
+:librariesDir: ../libraries
+:stylesDir: stylesheets
+:xrefstyle: full
+:experimental:
+:linkattrs:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:warning-caption: :warning:
+endif::[]
+
+:url-repo: https://github.com/zach-goh/OmronRepos/tree/master
+:url-ug: https://github.com/zach-goh/OmronRepos/blob/master/docs/UserGuide.adoc
+
+Last updated: `17 January 2022` By: `Son Linh`
+
+== Authors
+
+* Xavier, Lee Kok Teng (link:https://github.com/lekoook[lekoook])
+* Tan Guan Yew (link:https://github.com/guanyewtan[guanyewtan])
+* Zeon Chua Feiyi (link:https://github.com/CFZeon[CFZeon])
+* Nguyen Son Linh (link:https://github.com/linhns[linhns])
+
+== Getting Started
+[[prerequisites]]
+=== Prerequisites
+
+. **Ubuntu 20.04 LTS (Focal Fossa)**
++
+See link:https://ubuntu.com/download/desktop[Ubuntu] webpage for installation instructions (version 20.04 release).
++
+These packages were tested using Ubuntu Linux OS. Although ROS 2 is officially supported on multiple platforms including Windows OS (experimental), *Ubuntu Linux OS is preferred* since there is greater support for packages on Ubuntu platform. (These packages have not been tested on Windows OS)
++
+*Virtual Machines:*
++
+This AMR package can also be used on a virtual machine running Ubuntu 20.04. Ensure that the virtual machine is able to communicate with the AMR via ethernet cable, and network configuration has been done according to <<Set Up User Ethernet>>. 
++
+The virtual machine tested is Oracle VM VirtualBox. Ensure that the network adapter has been set as "Bridged Adapter".
+
+. **Robot Operating System 2 (ROS 2) Foxy Fitzroy Release**
++
+Download and installation instructions can be found link:https://docs.ros.org/en/foxy/Installation/Linux-Install-Debians.html[here].
++
+[NOTE]
+Installing via the Ubuntu terminal and debian packages is the most convenient way to install ROS 2.
++
+__Omron_TM_ROS2__ is currently supported on ROS 2 Foxy only.
++
+This guide assumes you know the basics of using the ROS 2 environment. If you are new to ROS 2, please follow their series of link:https://docs.ros.org/en/foxy/Tutorials.html[tutorials] to get started with using ROS 2.
++
+You will need to complete at least the `Beginner Level` tutorials. 
+
+. **'selector2' Python2 module**
++
+__Omron_AMR_ROS2__ uses Python low-level socket to communicate with the AMR. __selector2__ is used to assist in managing the reading/writing process through these sockets.
++
+See link:https://pypi.org/project/selectors2/[selectors2].
+
+. **'ROS2 Foxy Control Msgs'**
++
+Some messages that do not come with the standard installation of ROS2 is required for this pacakge. You can install __control msgs__ with
++
+sudo apt install ros-foxy-control-msgs
+
+. **Telnet**
++
+Telnet application. This is only used for directly communicating with AMR's ARCL interface via a command line interface.
+
+. **MobilePlanner 5.1.8 / ARAM**
++
+The AMR set up and configuration instructions here are based on `MobilePlanner 5.1.8`.
+
+=== Hardware Requirements
+This package assumes a specific hardware configuration in order to work correctly.
+
+. LD-60
++
+This is the AMR we tested in this package. Any AMR that uses the ARCL interface should work.
+
+. Host machine
++
+This is a machine that communicates with the AMR, either via ethernet or wireless connection using the ARCL interface. We used the Intel NUC8i5BEH mini PC to run ROS and communicate with the AMR via ethernet connection, however any on-board PC that is able to run ROS2 Foxy and maintain an ethernet connection should work i.e. Raspberry Pi, a laptop running Ubuntu 20.04.
+
+. User remote machines running ROS nodes.
++
+This can be a single or multiple machines that is used to run ROS nodes that communicates with the host machine. This can either be connected to the host machine wired or wirelessly. Wireless connection is preferred as the AMR will not be tethered to anything this way.
+
+==== Communications Overview
+
+The diagram below gives an overview of how the communication is configured:
+
+.Overview of communication
+image::comms_overview.png[]
+
+==== Hardware Wiring
+The diagram below gives an overview of how the various machines needs to be wired with the AMR.
+
+.Machines Wiring Diagram
+image::wiring_diagram.png[]
+
+The buck converter (or any other stepdown/buck converter you will use) steps the 24V-26V voltage provided by the AMR's User Power port down to a 12V-19V voltage range. The host machine used in this package is `Intel NUC8i5BEH` which accepts a 12V-19V range as input. If you use any other host machines, you will need to ensure the voltage  is stepped down or up from the AMR User Power port.
+
+For information on what pins on AMR User Power port can be used, please refer to your AMR User Manual to understand which pins can be used for power as it may differ between devices.
+
+=== Set Up AMR
+In order to use this package, your AMR must be configured correctly to communicate with the host machine running this ROS package. This configuration will be done via `MobilePlanner` hence, this guide assumes you have basic knowledge on using the `MobilePlanner` software.
+
+==== Set Up User Ethernet
+For reliable communication with the AMR, the user ethernet port is preferred. For the LD we used, the user ethernet port along with it's IP needs to be configured via `SetNetGo`. You can find instructions on using `SetNetGo` in LD's User Manual or MobilePlanner User Manual.
+
+You need to configure the LD's user ethernet port to use `192.168.1.1` as its address. This address is set in the launch file of the om_aiv_util directory to be used as the remote socket address. If you decide to use another address, you will need to change those ROS params.
+
+Additionally, the host machine should be configured with the `192.168.1.50` address since this is also set in the ROS params in this package. If you decide to use another address, you will need to change those ROS params as well.
+
+==== Set Up ARCL
+The primary communication interface between the AMR and host machine is the `ARCL` interface. `ARCL` which stands for 'Advanced Robotics Command Language' is a communication interface that allows operators to control the AMR through a network connection. See the ARCL Reference Manual to understand it's usage.
+
+The LD's ARCL configuration parameters must be set correctly for this package to work. First, connect to LD with `MobilePlanner` and open up the configuration page for your LD.
+
+Within the `Robot Interface` tab, under the `ARCL server setup` section, ensure the following is set as such:
+
+* `OpenTextServer`: `True`
++
+This will enable ARCL. 
+[WARNING]
+The package will not work if the ARCL interface is not turned on.
+* `PortNumber`: `7171`
++ 
+This is the port number that remote clients (like this ROS package) need to connect to for ARCL. Default is `7171`. The ROS params is set to use this port. If you change this port here, you will need to change those ROS params as well.
+* `Password`: `omron`
++
+This is the password for ARCL server. **This is required.** The ROS parameter for this password in this package is set to `omron`. If you set this to something else other than `omron` in this field, you will need to change the ROS params as well.
+
+.Example for `ARCL server setup`
+image::arcl_server_setup.png[]
+
+Within the `Robot Interface` tab, under the `Outgoing ARCL connection setup` section, ensure the following is set as such:
+
+* `OutgoingHostname`: `192.168.1.50`
++
+This is the address of your host machine. If you have set up your host machine to have a different address, this field must reflect that.
+* `OutgoingPort`: `7179`
++
+This is the port used by the LD for ARCL communication. Default is `7179`.
+* `SendStatusInterval`: `0`
++
+This is the frequency of sending ARCL single line status command. We are using the multiple lines status command here and not single line, so set this to `0`.
+* `OutgoingSocketTimeoutInMins`: `-1.0`
++
+This value indicates the duration in minutes before the LD closes a ARCL connection when no data is received. Since we may not send data to ARCL all the time and we do not want the connection to close prematurely, set this to `-1.0` which keeps the connection open indefinitely until we close it.
+* `RequireConnectionToPathPlan`: `True`
++
+Setting this 'True' incates that an ARCL connection is required for the robot to drive autonomously. For extra safety, this is set to 'True' so in the case that a connection between host machine and LD it lost, it would stop driving autonomously.
+
+[NOTE]
+The instructions here are for the LD-60 with Mobile Planner 5.1.8. Refer to your AMR's User Guide for the ARCL settings.
+
+.Example for `Outgoing ARCL connection setup`
+image::outgoing_arcl_connection_setup.png[]
+
+[[outgoing-arcl]]
+Within the `Robot Interface` tab, under the `Outgoing ARCL commands` section, ensure the following is set as such:
+
+* `OutgoingCommands1`: `Status`
++
+This will get LD to send out the `Status` ARCL command repeatedly on it's own.
+* `OutgoingCommands1Seconds`: `0.1`
++
+This is the interval for `OutgoingCommands1` configuration.
+* `OutgoingCommands2`: `RangeDeviceGetCurrent Laser_1`
++
+This will get LD to send out the XY coordinates from it's main LIDAR scan repeatedly on it's own.
+* `OutgoingCommands2Seconds`: `0.5`
++
+This is the interval for `OutgoingCommands2` configuration.
+* `OutgoingCommands3`: `GetGoals | Odometer | ApplicationFaultQuery`
++
+This will get LD to send out the `GetGoals`, `Odometer` and `ApplicationFaultQuery` ARCL command repeatedly on it's own.
+* `OutgoingCommands3Seconds`: `0.6`
++
+This is the interval for `OutgoingCommands3` configuration.
+
+The above interval values tested to be working. You can modify them if you find a need to (ie. faster laser scan updates).
+
+.Example for `Outgoing ARCL commands`
+image::outgoing_arcl_commands.png[]
+
+[[set-up-host-remote-machine]]
+=== Set Up Host/Remote Machine
+The host machine is used to communicate with the AMR via the ARCL interface in order to retrieve vital information about the AMR that is used for this package to work.
+
+In our use case, we use the Intel NUC8i5BEH mini PC as host machine connected to AMR's user ethernet port. Make sure your host machine meets the requirements in <<prerequisites>>.
+
+As for remote machine(s), you can use your personal computer to run ROS nodes. Make sure your machine meets the requirements in <<prerequisites>>.
+
+==== IP Address
+Since we have set the `OutgoingHostname` to `192.168.1.50`, you need to set the ethernet network interface of your host machine to have an address of `192.168.1.50` as well. A guide on this can be found online.
+
+==== ROS2 Across Multiple Machines
+In order to run ROS2 on mulitple machines, you need to configure your host machine as well as your user remote machine(s) to communicate with each other.
+
+Ensure that both the remote machine and host machine are on the same subnet and are discoverable to each other. Please follow the guide https://roboticsbackend.com/ros2-multiple-machines-including-raspberry-pi[here] using the host and remote machine. Turn off Wi-Fi on your remote machine and turn it back on after 30 seconds if you have trouble completing the guide.
+
+Also ensure that the ROS_DOMAIN_ID of both devices are the same.
+
+To verify success, run the steps in the next few sections. The remote machine should be able to run the visualisation packages correctly.
+
+==== Host Machine ROS Package Set Up
+Once you have your network set up correctly, you need to set up our ROS package to work correctly in your host machine.
+
+First, make sure you have installed ROS as described in <<prerequisites>>.
+
+. Clone this repository to a directory of your choice with: 
++
+....
+cd /to/desired/path
+git clone https://github.com/zach-goh/Omron_AMR_ROS2
+....
+. Navigate to that directory with:
++
+....
+cd Omron_AMR_ROS2
+....
+. Build this package with:
++
+....
+colcon build --symlink-install
+....
++
+Depending on your machine, this can take a while to build.
+. After it has built successfully, ensure you source this workspace with:
++
+....
+source install/setup.bash
+....
+. Run the `om_aiv_util` package with:
++
+....
+ros2 launch om_aiv_util server.launch.py
+....
++
+This will launch the core nodes that communicates this host machine with AMR via the ARCL interface.
+
+[NOTE]
+You may notice a mismatch of map and laser scans. In this case, you need to make sure the local copy of the map file in the host machine is the same as the one used internally by AMR. To understand this, see <<map-loading-reading>>
+
+=== Intel NUC8i5BEH Host Machine
+Please see https://github.com/zach-goh/Omron_AMR_ROS2/blob/master/launch_ros_on_startup.docx[here] for a guide on how we configured our NUC to run the ROS nodes upon startup.
+
+Running the ROS nodes upon startup is not recommended as the NUC may experience problems during boot. Instead, use `ssh` to interactively issue commands from your remote machine to the NUC. This also allows for easier discovery and debugging of any problems that might occur. A guide on how to ssh into a machine can be found online.
+
+=== Running on Remote Machine
+The instructions here assumes you have basic knowledge of using Git, Ubuntu, Bash terminal and ROS environment.
+
+Follow these steps to run this package:
+
+. Prepare a remote machine that meets the requirements in <<prerequisites>>. 
+. Clone this repository to a directory of your choice with: 
++
+....
+cd /to/desired/path
+git clone https://github.com/zach-goh/Omron_AMR_ROS2
+....
+. Navigate to that directory with:
++
+....
+cd Omron_AMR_ROS2
+....
+. Build this package with:
++
+....
+colcon build --symlink-install
+....
++
+Depending on your machine, this can take a while to build.
+. After it has built successfully, ensure you source this workspace with:
++
+....
+source install/setup.bash
+....
+. Try running the `amr_visualisation` package with: 
++
+....
+ros2 launch amr_visualisation display.launch.py
+....
+. If you have set up the host and remote machines correctly, you should see RViz opening with the map and laser scans of your AMR.
+
+== Software Design
+[[architecture]]
+=== Architecture
+An overview of this package architecture is summarised in the diagram below:
+
+.Overview of package
+image::overview.png[]
+
+External devices can communicate with the AMR via the ARCL interface. The AMR hosts an ARCL server that remote clients can communicate with. This is indicated by the blue `ARCL Server` block in the diagram.
+
+In this case, the host machine will communicate via this ARCL interface. The host machine has three python modules, `Socket Driver`, `Socket Listener` and `Socket Taskmaster`. Each module opens a socket connection to the ARCL server. There are three ROS nodes that the host machines will run, `ARCL API Server`, `LD States Publisher` and `Action Server`. Their relationship with the python modules are illustrated in the diagram. These nodes and sockets will run on the host machine that is directly connected to the AMR. These are indicated by the red blocks in the diagram.
+
+`ARCL API Server` and `LD States Publisher` nodes are implemented in the `om_aiv_util` package. `Action Server` node is implemented in the `om_aiv_navigation` package.
+
+With the three ROS nodes, the host machine will provide a ROS interface to allow remote machines to retrieve information from, as well as controlling the AMR.
+
+The remote machines are then able to leverage these nodes to communicate with the LD to retrieve information or to control it. These are indicated by the green blocks in the diagram. See <<amr-visualisation-package>> for how this can be implemented.
+
+=== LD States Publisher
+This ROS node is named `ld_states_publisher` during ROS runtime. The code can be found in `om_aiv_util/om_aiv_util/ld_states_publisher.py`.
+
+The purpose of this node is to listen for a information that is published by the ARCL server about the AMR. It then publishes these information on dedicated topics in the ROS environment.
+
+The information is summarised below:
+
+* `Status`: General message on robot's operations and actions.
+* `StateOfCharge`: Battery percentage
+* `Location`: XY coordinates of AMRv's position
+* `LocalizationScore`: The health of AMR's localization accuracy.
+* `Temperature`: Operation temperature of AMR.
+* `ExtendedStatusForHumans`: Additional message to `Status` message
+
+==== ARCL Commands Used
+The publishing of the information above is made possible by a set of ARCL commands. These commands are automatically executed by the ARCL server during operation. See <<outgoing-arcl, Section 2.3.2, “Set Up ARCL">> on an example of how this can be done.
+
+The ARCL commands configured in ARCL server are:
+
+. Status
+. RangeDeviceGetCurrent
+. GetGoals
+. Odometer
+. ApplicationFaultQuery
+
+For information on what each of these commands do and how it works, please see the ARCL Reference Guide for detailed explanation.
+
+[NOTE]
+====
+__RangeDeviceGetCurrent__ is not documented in the ARCL Reference Guide. This command outputs the laser scan data of the specified laser device. 
+
+This command works in the following format: `RangeDeviceGetCurrent [laser-device-name]`
+
+Where you should substitute [laser-device-name] field, including the `[]`, with the idetifying name of the laser device you want the data from. The output data are pairs of X-Y coordinates that represents the scan points in the world coordinate frame of the AMR.
+
+So an output with 5 laser points will look like this: `X1 Y1 X2 Y2 X3 Y3 X4 Y4 X5 Y5`
+
+For example in this package, __RangeDeviceGetCurrent Laser_1__ is used. The __Laser_1__ refers to the primary laser device used for mapping by AMR. Specifying another laser device name will show the data for that device instead (eg. Laser_2).
+
+Use `MobilePlanner` software to see what laser devices are installed in the AMR and what their names are.
+====
+
+=== ARCL API Server
+This ROS service node is named `arcl_api_server` during ROS runtime. The code can be found in `om_aiv_util/om_aiv_util/arcl_api_server.py`.
+
+The purpose of this service node is to allow other ROS nodes to request for information of a ARCL command and wait for the response. This allows any ROS nodes to post an ARCL command to the ARCL server and retrieve the response via this service node without having to have access to AMR directly.
+
+This service node supports every single ARCL command.
+
+=== Action Server
+This is a ROS action server node, named `action_servers` during ROS runtime.
+The code can be found in `om_aiv_navigation/om_aiv_navigation/action_servers.py`.
+
+The purpose of this action node is similar to `ARCL API Server`. However, this node can publish feedback during the execution of a ARCL command. This is useful in situations where you need to execute a ARCL command that will last for a significant duration. 
+
+For example, when executing a `goto` ARCL command to move the AMR to a specified location, the AMR will require time to reach the goal. During this time, the ARCL server will continuously post messages regarding the status of the command and the AMR. `Action Server` leverages this and informs clients to this action server about these status messages.
+
+[[amr-visualisation-package]]
+=== AMR Visualisation Package
+The `AMR Visualisation` package illustrates how a remote machine can communicate with the host machine to talk to the AMR to retrieve information.
+
+`AMR Visualisation` serves as an example as to how you can leverage the `ARCL API Server`, `LD States Publisher` and `Action Server` nodes to have basic interactions with the AMR through ROS. 
+
+To understand how `AMR Visualisation` is structured with the entire ROS package and communicates with AMR, see <<architecture>>.
+
+`AMR Visualisation` has three nodes, they are summarised as below:
+
+[cols="1,1a", options="header"]
+.AMR Visualisation nodes
+|===
+|**Node name**
+|**Description**
+
+|joints_publisher
+|
+This node is responsible for subscribing to the topic that publishes current location of the AMR.
+
+Using this information, it updates the position of AMR shown on RVIZ.
+
+|goals_marker
+|
+This node is responsible for subscribing to the topic that publishes the name of goals that AMR is tracking.
+
+Using these goal names, it then requests for the coordinates of these goal points using `ARCL API Server`. These coordinates are used to visualise these goals on RVIZ.
+
+|data_points_marker
+|
+This node is responsible for subscribing to the topic that publishes the coordinate of laser scan points.
+
+Using these information, it publishes marker points on RVIZ to visualise every single scanned points.
+
+Additionally, it also reads a `.map` created by the `MobilePlanner` software. This `.map` file contains all static map laser scan data points as well as forbidden areas. These information are all read by this node to be visualised on RVIZ. The points are then converted into an nav_msgs::msg::OccupancyGrid type to be represented as a map
+
+**This map file should exist on both the host machine and the remote machine running `AMR Visualisation`.**
+
+See <<map-loading-reading>> to understand how to load a map onto the remote machine.
+
+| goto_point
+| This node is responsible for subscribing to the topic that RViz uses when you click on 2D Goal Pose and put it on the map.
+
+When the subscriber receives a set of coordinates, a callback function will format the coordinates and send it to the AMR through the action server. The AMR will move to that point.
+
+| localize_at_point
+| This node is responsible for subscribing to the topic that RViz uses when you click on 2D Pose Estimate and put it on the map.
+
+When the subscriber receives a set of coordinates, a callback function will format the coordinates and send it to the AMR through the action server. The AMR will then be localized to that spot on the map.
+
+|===
+
+== Implementation
+[[map-loading-reading]]
+=== Map Loading and Reading
+ARCL does not provide an interface to retrieve map data as from the AMR.
+
+These information are stored in the `.map` file when you use `MobilePlanner` to scan a new map environment. The `amr_visualisation` package uses this `.map` file to parse and display the information on RVIZ.
+
+A copy of the `.map` file must be retrieved from AMR via `MobilePlanner`, then placed in the `amr_visualisation/map` directory and renamed to `data.map`. This `.map` file is read by `data_points_marker` node during ROS runtime to display map information on RVIZ.
+
+Any other `.map` files in this directory will be ignored.
+
+Here we use the OccupancyGrid message type to represent the map as it is a lighter and less intensive message type to represent in RViz.
+
+
+The name of this `.map` file can be configured as a ROS param. `AMR Visualisation` ROS params can be found in `amr_visualisation/param/vis_param.yaml`
+
+The `.map` file coordinate data is converted into an appropriately sized OccupancyGrid map. To ensure correct positioning and scaling, the map coordinates are based off the input data from the `.map` file exactly and has its origin position set to the minimum coordinates found in the `.map` file. All points are then iterated through and if it lies on a grid, that grid has its occupancy value set to 100.
+
+image::map_explanation.png[]
+
+More information on how this implementation works can be found in `amr_visualisation/src/data_points_marker.cpp`
+
+With this implementation, any changes to the `.map` file on AMR can be reflected in RVIZ only by transferring the entire new `.map` file to our package and restarting the `AMR Visualisation` nodes. **This is a hard restriction from AMR software.** Additional support has to be provided by the AMR software team before a more user friendly and convenient solution can be reached.
+
+=== Forbidden Areas Information Format
+This section illustrates how the forbidden areas information are stored in the `.map` file. The format is counter-intuitive and hence included for your understanding.
+
+In the `.map` file, a forbidden area's information is encapsulated as a single line like this:
+
+....
+Cairn: ForbiddenArea 0 0 180.000000 "" ICON "FA1" -18561 -13725 -15055 -7739
+....
+
+* `ForbiddenArea` indicates that this line is information about a forbidden area.
+* `180.000000` indicates the heading of this forbidden area.
+* `FA1` indicates the name given to this forbidden area during creation.
+* All other fields except for the last 4 numbers are irrelevant (As far as I know, except maybe the description field).
+
+Conventionally, a rectangle can be represented with two sets of XY coordinates that are at opposing corners of the rectangle. This is also how it works in `MobilePlanner`. You give the coordinates of two opposing corners when drawing in `MobilePlanner`.
+
+`-18561 -13725 -15055 -7739` should represent `X1 Y1 X2 Y2` which are the two opposing corners, however if you compare the values here with the values you used to create the forbbiden area in `MobilePlanner`, they can be entirely different once you give a heading that is > 0.
+
+The coordinates in the `.map` file are the polar coordinates transformation from the actual forbidden area.
+
+Suppose you have an area defined with heading `90` degree and location denoted by two corners with the coordinates `6 0` and `4 2`, in the form of `X Y`. The centre of this area is thus `5 1`.
+
+The `.map` file (transformed area) is the polar coordinate transformation of the above coordinates. That means that the centre of the transformed area (radial coordinate), joined to the pole or pole axis is rotated by `90` degrees in the counter clockwise direction. The centre of this new transformed area is thus `-1 5`
+
+As a result, the new coordinates of the respective corners will be `0 4` and `-2 6`. The line in `.map` file should be shown as:
+
+....
+Cairn: ForbiddenArea 0 0 90.000000 "" ICON "FA1" 0 4 -2 6
+....
+
+You may wish to experiment by drawing some simple forbidden areas on `MobilePlanner` and then drawing the coordinates on a 2D grid to understand what is going on here.
+
+=== Visualization of Forbidden Areas
+Navigate to line 367 of `src/amr_visualisation/src/data_points_marker.cpp` and set a lower occupancy value, which will result in a lighter display in RViZ. More detailed instructions can be found there.
+
+== Examples
+=== ROS Action: goto Goal
+There are two example codes, `om_aiv_navigation/om_aiv_navigation/goto_goal.py` and `om_aiv_navigation/om_aiv_navigation/goto_goal_demo.py`.
+
+These code files serves as an example as to how you can leverage the ROS Action servers that come with this package. The `om_aiv_util` package starts an action server, and the example code uses an action client to send a goal to the action server.
+
+The example code simply performs the `goto` ARCL command with `Goal1` and `Goal2` as the arguments. This gets the AMR to move to `Goal1` then `Goal2` on the map, or only `Goal1`, depending on which script is run.
+
+During these operations, the feedback and result messages will be published in ROS topics.
+
+[NOTE]
+You need to have two goals named `Goal1` and `Goal2` in your AMR map for these examples to work.
+
+. First, ensure your host machine, ROS master is up and running.
+. Run `amr_visualisation` package to see the movement of your AMR. To do this:
++
+....
+ros2 launch amr_visualisation display.launch.py
+....
+
+. In a separate terminal with the workspace sourced, run:
++
+....
+ros2 run om_aiv_navigation goto_goal
+....
+This will move your AMR to `Goal1` on your map. Once the operation has completed, you should see  the result message in the terminal.
+. Next, try moving AMR to `Goal1`, then `Goal2` with:
++
+.... 
+ros2 run om_aiv_navigation goto_goal_demo
+.... 
+
+=== ROS Action: goto_point and localize_at_point
+In `om_aiv_navigation/om_aiv_navigation/goto_point.py` and `om_aiv_navigation/om_aiv_navigation/localize_at_point.py` are examples of how rviz functions can be subscribed to and used for navigating the AMR. 
+
+They make use of the same action server used to interact with the LD, while subscribing to the RViz topics for the 2 buttons `2D Pose Estimate` and `2D Goal Pose`. When the subscriber receives the published coordinates, the callback function use the action client to send the command to the action server.
+
+image::rviz_pose.png[]
+
+. Ensure your host machine, ROS master is up and running.
+. Run `amr_visualisation` package to see the movement of your AMR. To do this:
++
+....
+ros2 launch amr_visualisation display.launch.py
+....
+. Click on the `2D Goal Pose` button and then on the map.
++
+image::rviz_example.png[]
++
+. The AMR should move to the point clicked on.
+. Afterwards, to test the localization, hit E-stop on the AMR and turn it off.
+. Push it somewhere far from its original location
+. Turn it back on.
+. Click on the 2D Pose Estimate button.
+. Click on the map where the actual robot location is and ensure that the arrow is pointing in the same direction as the robot.
+. The robot should now be localized to that location.
+
+
+=== ROS Action: Dock
+There is an example code `om_aiv_navigation/om_aiv_navigation/dock.py` that demonstrates how you can add new commands using the action server by sending your own ARCL commands through an action client.
+
+This example is the same as the one above but serves to show how new commands can easily be added.
+
+[NOTE]
+The commands given should be valid ARCL commands. Refer to the ARCL documentation on what constitutes a valid ARCL command.
+
+Ensure your map has a docking station named `dock` before proceeding with this example.
+
+. First, ensure your host machine, ROS master is up and running.
+. Run `amr_visualisation` package to see the movement of your AMR. To do this:
++
+....
+ros2 launch amr_visualisation display.launch.py
+....
+
+. In a separate terminal with the workspace sourced, run:
++
+....
+ros2 run om_aiv_navigation dock
+....
+This will move your AMR to `dock` on the map. Once in position, the docking sequence should proceed as per usual.
+
+==== Command Parsing
+To create your own standalone commands, a few extra steps are required for the ARCL messages to be parsed correctly.
+
+. Navigate to `src/om_aiv_util/om_aiv_util/parser.py` then add an `elif` clause to the function `(process_arcl_server())`.
+. Choose an appropriate substring to search for that determines that the action taken is completed. i.e. `Docking` in `DockingState:Docking`
+. Search for that substring in the feedback message. You can refer to ARCL documentation to determine what constitutes an appropriate substring to search for.
+. Assign a representative message to check if the action is completed or has failed with `PASS` or `FAIL` respectively, then choose a simplified string to indicate the respective command and return it as a list to the callback function for the Action Server.
