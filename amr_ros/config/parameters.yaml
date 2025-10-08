@@ -1,9 +1,58 @@
-amr_core_cpp:
+amr_core:
   ros__parameters:
-    robot_ip: "192.168.1.1"
-    robot_port: 7171
-    robot_password: "omron"
-    host_ip: "192.168.1.50"
-    host_port: 7179
-    publisher_frequency: 5
-    service_timeout_ms: 15000
+    robot:
+      ip: "192.168.1.1"
+      port: 7171
+      password: "omron"
+
+    host:
+      ip: "192.168.1.50"
+      port: 7179
+
+    source_data:
+      publish: true
+      frequency: 5
+
+    map_data:
+      publish: true
+      topic: "map_grid"
+      frequency: 2
+      file: "data.map"
+
+    laser_scans:
+      publish: true
+      topic: "scan"
+      frame_id: "laser_frame"
+      angle_min: -1.5708
+      angle_max: 1.5708
+      angle_increment: 0.0069
+      time_increment: 0.0
+      scan_time: 0.1
+      range_min: 0.05
+      range_max: 30.0
+      use_intensity: false
+
+    goal_markers:
+      publish: true
+      topic: "goal_markers"
+      head_frame: "pose"
+      goals_a_colour: 1.0
+      goals_r_colour: 0.0
+      goals_g_colour: 1.0
+      goals_b_colour: 0.0
+      goal_texts_a_colour: 1.0
+      goal_texts_r_colour: 0.0
+      goal_texts_g_colour: 1.0
+      goal_texts_b_colour: 0.0
+
+    joint_states:
+      publish: true
+      topic: "joint_states"
+      frequency: 50
+
+    service:
+      enable: false
+      timeout_ms: 15000
+
+    action:
+      enable: false

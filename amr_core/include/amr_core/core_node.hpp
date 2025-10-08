@@ -20,6 +20,10 @@
 #include "amr_core/socket/socket_taskmaster.hpp"
 #include "amr_core/utils/parser.hpp"
 #include "amr_core/utils/amr_exception.hpp"
+#include "amr_core/support/map_loader.hpp"
+#include "amr_core/support/laser_scans.hpp"
+#include "amr_core/support/joint_publisher.hpp"
+#include "amr_core/support/goal_markers.hpp"
 
 using namespace std::chrono_literals;
 
@@ -34,96 +38,181 @@ public:
   {
   }
 
+  /**
+   * @brief This function initializes the core node by reading parameters, setting up publishers, services, and action
+   * servers, and establishing connections to the robot.
+   */
   void initialize()
   {
     // Shared connection params (service + action)
-    ip_ = this->declare_parameter<std::string>("robot_ip", "127.0.0.1");
-    port_ = this->declare_parameter<int>("robot_port", 0);
-    passwd_ = this->declare_parameter<std::string>("robot_password", "");
-    svc_timeout_ms_ = this->declare_parameter<int>("service_timeout_ms", 15000);
+    ip_ = this->declare_parameter<std::string>("robot.ip", "127.0.0.1");
+    port_ = this->declare_parameter<int>("robot.port", 0);
+    passwd_ = this->declare_parameter<std::string>("robot.password", "");
 
-    // Publisher (listener) endpoint (defaults to same ip/port if not set)
-    host_ip_ = this->declare_parameter<std::string>("host_ip", ip_);
-    host_port_ = this->declare_parameter<int>("host_port", port_);
-    publisher_frequency_ = this->declare_parameter<int>("publisher_frequency", 5);
+    // listener endpoint (defaults to same ip/port if not set)
+    host_ip_ = this->declare_parameter<std::string>("host.ip", ip_);
+    host_port_ = this->declare_parameter<int>("host.port", port_);
 
-    pub_interval_ms_ = int(1000 / publisher_frequency_);
+    // Service
+    enable_service_ = this->declare_parameter<bool>("service.enable", false);
+    svc_timeout_ms_ = this->declare_parameter<int>("service.timeout_ms", 15000);
+    if (!enable_service_)
+      RCLCPP_WARN(this->get_logger(), "Service server is disabled");
 
-    status_pub_ = this->create_publisher<amr_msgs::msg::Status>("amr/status", 10);
-    laser_pub_ = this->create_publisher<std_msgs::msg::String>("amr/laser", 10);
-    goals_pub_ = this->create_publisher<std_msgs::msg::String>("amr/all_goals", 10);
-    odom_pub_ = this->create_publisher<std_msgs::msg::String>("amr/odom", 10);
-    app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("amr/application_fault_query", 10);
-    faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/faults_get", 10);
-    query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/query_faults", 10);
+    // Action
+    enable_actions_ = this->declare_parameter<bool>("action.enable", false);
+    if (!enable_actions_)
+      RCLCPP_WARN(this->get_logger(), "Action server is disabled");
+
+    // Publisher params
+    // Publish source data from listener
+    publish_source_ = this->declare_parameter<bool>("source_data.publish", false);
+    publish_frequency_ = this->declare_parameter<int>("source_data.frequency", 5);
+    pub_interval_ms_ = int(1000 / publish_frequency_);
+
+    // Publish source data from listener
+    if (publish_source_)
+    {
+      RCLCPP_INFO(this->get_logger(), "Publishing source data from listener enabled");
+
+      status_pub_ = this->create_publisher<amr_msgs::msg::Status>("amr/source/status", 10);
+      laser_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/laser", 10);
+      goals_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/all_goals", 10);
+      odom_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/odom", 10);
+      app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/application_fault_query", 10);
+      faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/faults_get", 10);
+      query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/query_faults", 10);
+    }
+    else
+    {
+      RCLCPP_INFO(this->get_logger(), "Publishing source data from listener is disabled");
+    }
 
     // Srvice: SocketDriver (low-level)
+    RCLCPP_INFO(this->get_logger(), "Initializing SocketDriver..");
     try
     {
       driver_ = std::make_shared<SocketDriver>(this->shared_from_this());
       driver_->connect(ip_, static_cast<uint16_t>(port_));
       driver_->login(passwd_);
 
-      RCLCPP_INFO(this->get_logger(), "SocketDriver(APIServer) connected to %s:%d", ip_.c_str(), port_);
+      RCLCPP_INFO(this->get_logger(), "SocketDriver connected to %s:%d", ip_.c_str(), port_);
     }
     catch (const amr_exception& e)
     {
-      RCLCPP_ERROR(this->get_logger(), "SocketDriver(APIServer) initialization failed: %s", e.what());
+      RCLCPP_ERROR(this->get_logger(), "SocketDriver initialization failed: %s", e.what());
     }
 
     // Action server: SocketTaskmaster (high-level)
+    RCLCPP_INFO(this->get_logger(), "Initializing SocketTaskmaster..");
     try
     {
       task_master_ = std::make_shared<SocketTaskmaster>(this->shared_from_this());
       task_master_->connect(ip_, port_);
       task_master_->login(passwd_);
 
-      RCLCPP_INFO(this->get_logger(), "ScoketTaskmaster(ActionServer) is up @ %s:%d", ip_.c_str(), port_);
+      RCLCPP_INFO(this->get_logger(), "ScoketTaskmaster is up @ %s:%d", ip_.c_str(), port_);
     }
     catch (const amr_exception& ex)
     {
-      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster(ActionServer) init failed: %s", ex.what());
+      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster init failed: %s", ex.what());
     }
 
     // Publisher: SocketListener
-    // try
-    // {
-    //   listener_ = std::make_shared<SocketListener>(this->shared_from_this(), host_ip_, host_port_);
-    //   if (!listener_->begin())
-    //     RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
-    //   else
-    //     RCLCPP_INFO(this->get_logger(), "SocketListener started on %s:%d", host_ip_.c_str(), host_port_);
-    // }
-    // catch (const amr_exception& ex)
-    // {
-    //   RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
-    // }
+    RCLCPP_INFO(this->get_logger(), "Initializing SocketListener..");
+    try
+    {
+      listener_ = std::make_shared<SocketListener>(this->shared_from_this(), host_ip_, host_port_);
+      if (!listener_->begin())
+        RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
+      else
+        RCLCPP_INFO(this->get_logger(), "SocketListener started on %s:%d", host_ip_.c_str(), host_port_);
+    }
+    catch (const amr_exception& ex)
+    {
+      RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
+    }
 
-    srv_ = this->create_service<ServiceARCL>(
-        "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
+    // Publish map data from file
+    publish_map_ = this->declare_parameter<bool>("map_data.publish", false);
+    if (publish_map_)
+    {
+      data_point_marker_ = std::make_shared<MapLoader>(this->shared_from_this());
+      data_point_marker_->initialize();
+      RCLCPP_INFO(this->get_logger(), "Publishing map data from file enabled");
+    }
 
-    action_ = rclcpp_action::create_server<ActionARCL>(
-        this->shared_from_this(), "action_server",
-        std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-        std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
-        std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
+    // Publish laser scans
+    publish_laser_scans_ = this->declare_parameter<bool>("laser_scans.publish", true);
+    if (publish_laser_scans_)
+    {
+      laser_scans_ = std::make_shared<LaserScans>(this->shared_from_this());
+      laser_scans_->initialize();
+      RCLCPP_INFO(this->get_logger(), "Publishing laser scans enabled");
+    }
 
-    // pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
+    // Publish goal markers
+    publish_goal_markers_ = this->declare_parameter<bool>("goal_markers.publish", false);
+    if (publish_goal_markers_)
+    {
+      goal_markers_ = std::make_shared<GoalMarkers>(this->shared_from_this(), driver_);
+      goal_markers_->initialize();
+      RCLCPP_INFO(this->get_logger(), "Publishing goal markers enabled");
+    }
+
+    // Publish joint states
+    publish_joints_ = this->declare_parameter<bool>("joint_states.publish", true);
+    if (publish_joints_)
+    {
+      joint_publisher_ = std::make_shared<JointsPublisher>(this->shared_from_this());
+      joint_publisher_->initialize();
+      RCLCPP_INFO(this->get_logger(), "Publishing joint states enabled");
+    }
+
+    // Enable or disable service server
+    if (enable_service_ && driver_)
+      srv_ = this->create_service<ServiceARCL>(
+          "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
+    else if (enable_service_ && !driver_)
+      RCLCPP_ERROR(this->get_logger(), "Service server is enabled but driver is not available");
+    else
+      RCLCPP_ERROR(this->get_logger(), "Service server is disabled");
+
+    // Enable or disable action server
+    if (enable_actions_ && task_master_)
+      action_ = rclcpp_action::create_server<ActionARCL>(
+          this->shared_from_this(), "arcl_api_action",
+          std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+          std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
+          std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
+    else if (enable_actions_ && !task_master_)
+      RCLCPP_ERROR(this->get_logger(), "Action server is enabled but taskmaster is not available");
+    else
+      RCLCPP_ERROR(this->get_logger(), "Action server is disabled");
+
+    // Publisher timer
+    pub_timer_ =
+        this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), std::bind(&CoreNode::on_pub_timer, this));
 
     RCLCPP_INFO(this->get_logger(), "CoreNode initialized");
   }
 
 private:
+  /**
+   * @brief This function handles incoming service requests to send ARCL commands to the robot.
+   */
   void handle_service(const std::shared_ptr<ServiceARCL::Request> req, std::shared_ptr<ServiceARCL::Response> resp)
   {
     std::string response;
     bool got_response;
 
+    // Check driver availability
     if (!driver_)
     {
       response = "ERROR: driver not available";
       got_response = true;
     }
+    // Send command to robot
     else
     {
       int req_id = driver_->queue_command(req->command, req->line_identifier);
@@ -138,24 +227,48 @@ private:
   }
 
   // -------- Action server (SocketTaskmaster) --------
+  /**
+   * @brief This function is called when a new goal is received by the action server.
+   *
+   * @param uuid The unique identifier for the goal.
+   * @param goal The goal message containing the command and identifiers.
+   * @return rclcpp_action::GoalResponse Indicates whether the goal is accepted or rejected
+   */
   rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID&, std::shared_ptr<const ActionARCL::Goal>)
   {
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
 
+  /**
+   * @brief This function is called when a goal is requested to be canceled by the action client.
+   *
+   * @param goal_handle The handle of the goal to be canceled.
+   * @return rclcpp_action::CancelResponse Indicates whether the cancel request is accepted or rejected.
+   */
   rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandle>)
   {
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
+  /**
+   * @brief This function is called when a new goal is accepted by the action server.
+   *
+   * @param goal_handle The handle of the accepted goal.
+   */
   void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle)
   {
     action_thread_ = std::thread(&CoreNode::execute, this, goal_handle);
     action_thread_.detach();
   }
 
+  /**
+   * @brief This function executes the action goal by sending commands to the robot and processing feedback.
+   *
+   * @param goal_handle The handle of the accepted goal.
+   */
   void execute(const std::shared_ptr<GoalHandle> goal_handle)
   {
+    // Check taskmaster availability
     if (!task_master_)
     {
       auto result = std::make_shared<ActionARCL::Result>();
@@ -165,18 +278,26 @@ private:
     }
 
     Parser parser;
+
+    // Get goal details
     auto goal = goal_handle->get_goal();
 
     std::vector<std::string> end_lines;
+
+    // Use first identifier as end line if available
     if (!goal->identifier.empty())
       end_lines.emplace_back(goal->identifier.front());
 
     try
     {
+      // Send command to robot
       task_master_->push_command(goal->command, true, end_lines);
     }
     catch (const amr_exception& ex)
     {
+      // Failed to send command
+      RCLCPP_ERROR(this->get_logger(), "push_command error: %s", ex.what());
+
       auto result = std::make_shared<ActionARCL::Result>();
       result->res_msg = std::string("push_command failed: ") + ex.what();
       goal_handle->abort(result);
@@ -189,6 +310,7 @@ private:
 
     while (rclcpp::ok())
     {
+      // Check for cancelation
       if (goal_handle->is_canceling())
       {
         result->res_msg = "Canceled";
@@ -196,6 +318,7 @@ private:
         return;
       }
 
+      // Wait for feedback or completion
       SocketTaskmaster::WaitResult wr{ false, "", "" };
       try
       {
@@ -203,11 +326,15 @@ private:
       }
       catch (const amr_exception& ex)
       {
+        // Failed to get feedback
+        RCLCPP_ERROR(this->get_logger(), "wait_command error: %s", ex.what());
+
         result->res_msg = std::string("wait_command error: ") + ex.what();
         goal_handle->abort(result);
         return;
       }
 
+      // Handle lack of feedback or no goal
       if (!wr.feedback.empty() && wr.feedback.find("No goal") != std::string::npos)
       {
         result->res_msg = "No such goal";
@@ -215,6 +342,7 @@ private:
         return;
       }
 
+      // Process feedback or completion
       if (wr.complete)
       {
         feedback->feed_msg = wr.feedback;
@@ -243,7 +371,7 @@ private:
           return;
         }
       }
-
+      // Check for timeout
       if (std::chrono::steady_clock::now() - start > std::chrono::minutes(10))
       {
         result->res_msg = "Timeout";
@@ -261,8 +389,13 @@ private:
   }
 
   // -------- Publisher (SocketListener -> topics) --------
+  /**
+   * @brief This function is called periodically by the publisher timer to poll the listener for new data and publish it
+   * to topics.
+   */
   void on_pub_timer()
   {
+    // Poll listener for new data
     try
     {
       while (listener_ && listener_->poll_once(0))
@@ -281,19 +414,19 @@ private:
     pub_app_fault_query();
     pub_faults_get();
     pub_query_faults();
-
-    // Command -> status
-    // Response:
-    //
-    // ExtendedStatusForHumans: Robot lost
-    // Status: Teleop driving
-    // StateOfCharge: 79.4
-    // Location: 79031 -81597 20
-    // LocalizationScore: 0.170543
-    // Temperature: 36
-
   }
 
+  /**
+   * @brief This function publishes the robot's status information to the status topic. This include parsing the
+   * following fields from the listener:
+   *
+   * ExtendedStatusForHumans: Robot lost
+   * Status: Teleop driving
+   * StateOfCharge: 79.4
+   * Location: 79031 -81597 20
+   * LocalizationScore: 0.170543
+   * Temperature: 36
+   */
   void pub_status()
   {
     amr_msgs::msg::Status status_msg;
@@ -330,14 +463,18 @@ private:
     }
     catch (const std::out_of_range&)
     {
+      RCLCPP_DEBUG(this->get_logger(), "Status data not available yet");
     }
     catch (const std::exception& ex)
     {
-      RCLCPP_WARN(this->get_logger(), "Status parse error: %s", ex.what());
+      RCLCPP_ERROR(this->get_logger(), "Status parse error: %s", ex.what());
     }
 
-    if (status_pub_)
+    if (publish_source_ && status_pub_)
       status_pub_->publish(status_msg);
+
+    if (publish_joints_ && joint_publisher_)
+      joint_publisher_->update(status_msg);
   }
 
   void pub_laser()
@@ -347,8 +484,12 @@ private:
       const auto& scans = listener_->get_response("RangeDeviceGetCurrent");
       std_msgs::msg::String msg;
       msg.data = scans.front();
-      if (laser_pub_)
+
+      if (publish_source_ && laser_pub_)
         laser_pub_->publish(msg);
+
+      if (publish_laser_scans_)
+        laser_scans_->update(msg);
     }
     catch (const std::out_of_range&)
     {
@@ -369,8 +510,11 @@ private:
       }
       std_msgs::msg::String msg;
       msg.data = joined;
-      if (goals_pub_)
+      if (publish_source_ && goals_pub_)
         goals_pub_->publish(msg);
+
+      if (publish_goal_markers_)
+        goal_markers_->update(msg, svc_timeout_ms_);
     }
     catch (const std::out_of_range&)
     {
@@ -391,7 +535,7 @@ private:
       }
       std_msgs::msg::String msg;
       msg.data = joined;
-      if (odom_pub_)
+      if (publish_source_ && odom_pub_)
         odom_pub_->publish(msg);
     }
     catch (const std::out_of_range&)
@@ -413,7 +557,7 @@ private:
       }
       std_msgs::msg::String msg;
       msg.data = joined;
-      if (app_fault_query_pub_)
+      if (publish_source_ && app_fault_query_pub_)
         app_fault_query_pub_->publish(msg);
     }
     catch (const std::out_of_range&)
@@ -435,7 +579,7 @@ private:
       }
       std_msgs::msg::String msg;
       msg.data = joined;
-      if (faults_get_pub_)
+      if (publish_source_ && faults_get_pub_)
         faults_get_pub_->publish(msg);
     }
     catch (const std::out_of_range&)
@@ -457,7 +601,7 @@ private:
       }
       std_msgs::msg::String msg;
       msg.data = joined;
-      if (query_faults_pub_)
+      if (publish_source_ && query_faults_pub_)
         query_faults_pub_->publish(msg);
     }
     catch (const std::out_of_range&)
@@ -471,15 +615,16 @@ private:
   int port_{ 0 };
   std::string passwd_;
   int svc_timeout_ms_{ 15000 };
-  int publisher_frequency_{ 5 };
+  int publish_frequency_{ 5 };
   int pub_interval_ms_{ 200 };
 
   std::string host_ip_;
   int host_port_{ 0 };
 
-  bool enable_pub_{ true };
-  bool enable_service_{ true };
-  bool enable_action_{ true };
+  bool publish_source_{ false };
+
+  bool enable_actions_{ false };
+  bool enable_service_{ false };
 
   // Service (driver)
   std::shared_ptr<SocketDriver> driver_;
@@ -494,7 +639,7 @@ private:
   std::shared_ptr<SocketListener> listener_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
 
-  // Pubs
+  // Source Pubs
   rclcpp::Publisher<amr_msgs::msg::Status>::SharedPtr status_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr laser_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr goals_pub_;
@@ -502,4 +647,20 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr app_fault_query_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr faults_get_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr query_faults_pub_;
+
+  // Map pubs
+  bool publish_map_{ false };
+  std::shared_ptr<MapLoader> data_point_marker_;  ///< Data point marker instance
+
+  // Laser scans
+  bool publish_laser_scans_{ false };
+  std::shared_ptr<LaserScans> laser_scans_;
+
+  // Goal markers
+  bool publish_goal_markers_{ false };
+  std::shared_ptr<GoalMarkers> goal_markers_;
+
+  // Joint states
+  bool publish_joints_{ false };
+  std::shared_ptr<JointsPublisher> joint_publisher_;
 };

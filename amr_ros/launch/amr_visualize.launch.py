@@ -22,10 +22,8 @@ def generate_launch_description():
     robot_description_config = load_file('amr_description', 'urdf/AMR_Platform.urdf')
     robot_description = {'robot_description' : robot_description_config}
 
-    vis_config = get_package_share_directory('amr_ros') + "/config/vis_param.yaml"
-
     # RViz
-    rviz_config_file = "src/amr_ros/rviz/rviz_amr_platform.rviz"
+    rviz_config_file = get_package_share_directory('amr_ros') + "/rviz/rviz_amr_platform.rviz"
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -54,7 +52,6 @@ def generate_launch_description():
         package='amr_description',
         executable='data_points_marker',
         output='screen',
-        parameters=[vis_config],
     )
         
     # Goals Marker

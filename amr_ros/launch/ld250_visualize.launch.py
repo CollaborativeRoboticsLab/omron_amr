@@ -23,9 +23,8 @@ def generate_launch_description():
     robot_description = {'robot_description' : robot_description_config}
 
     vis_config = get_package_share_directory('amr_ros') + "/config/vis_param.yaml"
-
-    # RViz
-    rviz_config_file = "src/amr_ros/rviz/rviz_ld250.rviz"
+    rviz_config_file = get_package_share_directory('amr_ros') + "/rviz/rviz_ld250.rviz"
+    
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',

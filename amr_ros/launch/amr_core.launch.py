@@ -8,9 +8,9 @@ core_parms = os.path.join(get_package_share_directory('amr_ros'), 'config', 'par
 def generate_launch_description():
 
     core = Node(
-        package='amr_core_cpp',
-        executable='amr_core_cpp',
-        name='amr_core_cpp',
+        package='amr_core',
+        executable='amr_core',
+        name='amr_core',
         output='screen',
         parameters=[core_parms],
     )

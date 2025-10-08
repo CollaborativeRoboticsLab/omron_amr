@@ -17,6 +17,11 @@
   <depend>amr_msgs</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>control_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_ros</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
