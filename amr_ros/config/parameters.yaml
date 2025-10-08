@@ -50,6 +50,20 @@ amr_core:
       topic: "joint_states"
       frequency: 50
 
+    driver:
+      publish_odom: true
+      subscribe_cmd_vel: true
+      odom_topic: "amr/odom"
+      odom_frame: "odom"
+      base_frame: "base_link"
+      cmd_vel_topic: "amr/cmd_vel"
+      odom_reset_topic: "amr/odomReset"
+      command_timeout_ms: 15000
+      min_linear_speed: -1000  # mm/s
+      max_linear_speed: 1000   # mm/s
+      min_angular_speed: -30    # deg/s
+      max_angular_speed: 30     # deg/s
+
     service:
       enable: false
       timeout_ms: 15000

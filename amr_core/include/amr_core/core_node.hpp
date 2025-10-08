@@ -24,6 +24,7 @@
 #include "amr_core/support/laser_scans.hpp"
 #include "amr_core/support/joint_publisher.hpp"
 #include "amr_core/support/goal_markers.hpp"
+#include "amr_core/support/driver.hpp"
 
 using namespace std::chrono_literals;
 
@@ -168,6 +169,10 @@ public:
       joint_publisher_->initialize();
       RCLCPP_INFO(this->get_logger(), "Publishing joint states enabled");
     }
+
+    // Driver
+    odom_driver_ = std::make_shared<Driver>(this->shared_from_this(), driver_);
+    odom_driver_->initialize();
 
     // Enable or disable service server
     if (enable_service_ && driver_)
@@ -537,6 +542,9 @@ private:
       msg.data = joined;
       if (publish_source_ && odom_pub_)
         odom_pub_->publish(msg);
+
+      if (odom_driver_)
+        odom_driver_->update(msg);
     }
     catch (const std::out_of_range&)
     {
@@ -663,4 +671,7 @@ private:
   // Joint states
   bool publish_joints_{ false };
   std::shared_ptr<JointsPublisher> joint_publisher_;
+
+  // Driver
+  std::shared_ptr<Driver> odom_driver_;
 };
