@@ -51,6 +51,7 @@ public:
     std::string command;
     std::string line_identifier;
     std::string response;
+    bool newLine{ false };
     bool done{ false };
   };
 
@@ -157,9 +158,26 @@ public:
     throw amr_exception(std::string("connect() failed: ") + std::strerror(err));
   }
 
+  /**
+   * @brief Send password and wait for "End of commands".
+   * @param passwd Password to send (appends CRLF).
+   * @throws amr_exception on I/O failure.
+   */
   void login(const std::string& passwd)
   {
-    send_line(passwd);
+    send_line(passwd, true);
+    wait_until_login()
+  }
+
+  /**
+   * @brief Block until "End of commands" is received.
+   * @throws amr_exception on I/O failure or timeout (15s).
+   *
+   * This method polls the socket every 100ms, reading any available data
+   * and checking for the login completion string.
+   */
+  void wait_until_login()
+  {
     auto start = std::chrono::steady_clock::now();
     std::vector<std::string> lines;
     for (;;)
@@ -303,11 +321,13 @@ public:
   /**
    * @brief Queue a CRLF-terminated line for sending.
    * @param s Line content (CRLF appended).
+   * @param newline If true, append CRLF (default true).
    */
-  void send_line(const std::string& s)
+  void send_line(const std::string& s, bool newline = true)
   {
     send_buf_.append(s);
-    send_buf_.append("\r\n");
+    if (newline)
+      send_buf_.append("\r\n");
   }
 
   /**
@@ -378,6 +398,7 @@ public:
     entry->id = current_id;
     entry->command = command;
     entry->line_identifier = line_identifier;
+    entry->newLine = newline;
     command_map_[current_id] = entry;
     command_queue_.push(entry);
     return current_id;
@@ -436,7 +457,7 @@ private:
       if (!command_queue_.empty())
       {
         auto entry = command_queue_.front();
-        send_line(entry->command);
+        send_line(entry->command, entry->newLine);
         command_queue_.pop();
       }
     }

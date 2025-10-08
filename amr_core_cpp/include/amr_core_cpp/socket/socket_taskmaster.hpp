@@ -103,6 +103,17 @@ public:
   }
 
   /**
+   * @brief Send password and wait for "End of commands".
+   * @param passwd Password to send (appends CRLF).
+   * @throws amr_exception on I/O failure.
+   */
+  void login(const std::string& passwd)
+  {
+    push_command(passwd, /*newline=*/true, /*end_lines=*/{ "End of commands" });
+    wait_until_login();
+  }
+
+  /**
    * @brief Process ready I/O events indicated by poll().
    * @param revents Bitmask of returned poll events.
    * @throws amr_exception on socket errors or I/O failures.
@@ -213,17 +224,6 @@ public:
       _feedback.clear();
       return { true, res, feed };
     }
-  }
-
-  /**
-   * @brief Send password and wait for "End of commands".
-   * @param passwd Password to send (appends CRLF).
-   * @throws amr_exception on I/O failure.
-   */
-  void login(const std::string& passwd)
-  {
-    push_command(passwd, /*newline=*/true, /*end_lines=*/{ "End of commands" });
-    wait_until_login();
   }
 
   /**

@@ -26,9 +26,9 @@ using namespace std::chrono_literals;
 class CoreNode : public rclcpp::Node
 {
 public:
-  using ServiceT = amr_msgs::srv::ArclApi;
-  using ActionT = amr_msgs::action::Action;
-  using GoalHandle = rclcpp_action::ServerGoalHandle<ActionT>;
+  using ServiceARCL = amr_msgs::srv::ArclApi;
+  using ActionARCL = amr_msgs::action::Action;
+  using GoalHandle = rclcpp_action::ServerGoalHandle<ActionARCL>;
 
   CoreNode() : rclcpp::Node("core_node")
   {
@@ -57,38 +57,43 @@ public:
     faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/faults_get", 10);
     query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/query_faults", 10);
 
+    srv_ = this->create_service<ServiceARCL>(
+        "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
+
+    action_ = rclcpp_action::create_server<ActionARCL>(
+        this->shared_from_this(), "action_server",
+        std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+        std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
+        std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
+
+    pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
+
     // Srvice: SocketDriver (low-level)
     try
     {
       driver_ = std::make_shared<SocketDriver>(this->shared_from_this());
-      (void)driver_->connect(ip_, static_cast<uint16_t>(port_));
+      driver_->connect(ip_, static_cast<uint16_t>(port_));
       driver_->login(passwd_);
-      srv_ = this->create_service<ServiceT>("arcl_api_service",
-                                            std::bind(&CoreNode::handle_service, this, std::placeholders::_1,
-                                                      std::placeholders::_2, std::placeholders::_3));
-      RCLCPP_INFO(this->get_logger(), "ARCL API Service ready @ %s:%d", ip_.c_str(), port_);
+
+      RCLCPP_INFO(this->get_logger(), "SocketDriver(APIServer) connected to %s:%d", ip_.c_str(), port_);
     }
-    catch (const amr_exception& ex)
+    catch (const amr_exception& e)
     {
-      RCLCPP_FATAL(this->get_logger(), "SocketDriver init failed: %s", ex.what());
+      RCLCPP_ERROR(this->get_logger(), "SocketDriver(APIServer) initialization failed: %s", e.what());
     }
 
     // Action server: SocketTaskmaster (high-level)
     try
     {
       task_master_ = std::make_shared<SocketTaskmaster>(this->shared_from_this());
-      (void)task_master_->connect(ip_, port_);
+      task_master_->connect(ip_, port_);
       task_master_->login(passwd_);
-      server_ = rclcpp_action::create_server<ActionT>(
-          this->shared_from_this(), "action_server",
-          std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-          std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
-          std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
-      RCLCPP_INFO(this->get_logger(), "Action server is up @ %s:%d", ip_.c_str(), port_);
+
+      RCLCPP_INFO(this->get_logger(), "ScoketTaskmaster(ActionServer) is up @ %s:%d", ip_.c_str(), port_);
     }
     catch (const amr_exception& ex)
     {
-      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster init failed: %s", ex.what());
+      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster(ActionServer) init failed: %s", ex.what());
     }
 
     // Publisher: SocketListener
@@ -96,14 +101,9 @@ public:
     {
       listener_ = std::make_shared<SocketListener>(this->shared_from_this(), host_ip_, host_port_);
       if (!listener_->begin())
-      {
         RCLCPP_ERROR(this->get_logger(), "SocketListener begin() failed");
-      }
       else
-      {
-        pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), [this]() { on_pub_timer(); });
-        RCLCPP_INFO(this->get_logger(), "States publisher on %s:%d", host_ip_.c_str(), host_port_);
-      }
+        RCLCPP_INFO(this->get_logger(), "SocketListener started on %s:%d", host_ip_.c_str(), host_port_);
     }
     catch (const amr_exception& ex)
     {
@@ -112,33 +112,31 @@ public:
   }
 
 private:
-
-  void handle_service(const std::shared_ptr<rmw_request_id_t>&, const std::shared_ptr<ServiceT::Request> req,
-                      std::shared_ptr<ServiceT::Response> resp)
+  void handle_service(const std::shared_ptr<ServiceARCL::Request> req, std::shared_ptr<ServiceARCL::Response> resp)
   {
+    std::string response;
+    bool got_response;
+
     if (!driver_)
     {
-      resp->response = "ERROR: driver not available";
-      return;
-    }
-
-    // Delegate queueing and response handling to SocketDriver
-    int req_id = driver_->queue_command(req->command, req->line_identifier);
-    std::string response;
-    bool got_response = driver_->wait_for_response(req_id, response, svc_timeout_ms_);
-
-    if (got_response)
-    {
-      resp->response = response;
+      response = "ERROR: driver not available";
+      got_response = true;
     }
     else
     {
-      resp->response = "TIMEOUT";
+      int req_id = driver_->queue_command(req->command, req->line_identifier);
+      got_response = driver_->wait_for_response(req_id, response, svc_timeout_ms_);
     }
+
+    // Delegate queueing and response handling to SocketDriver
+    if (got_response)
+      resp->response = response;
+    else
+      resp->response = "TIMEOUT";
   }
 
   // -------- Action server (SocketTaskmaster) --------
-  rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID&, std::shared_ptr<const ActionT::Goal>)
+  rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID&, std::shared_ptr<const ActionARCL::Goal>)
   {
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
@@ -150,14 +148,15 @@ private:
 
   void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle)
   {
-    std::thread(&CoreNode::execute, this, goal_handle).detach();
+    action_thread_ = std::thread(&CoreNode::execute, this, goal_handle);
+    action_thread_.detach();
   }
 
   void execute(const std::shared_ptr<GoalHandle> goal_handle)
   {
     if (!task_master_)
     {
-      auto result = std::make_shared<ActionT::Result>();
+      auto result = std::make_shared<ActionARCL::Result>();
       result->res_msg = "Taskmaster unavailable";
       goal_handle->abort(result);
       return;
@@ -176,14 +175,14 @@ private:
     }
     catch (const amr_exception& ex)
     {
-      auto result = std::make_shared<ActionT::Result>();
+      auto result = std::make_shared<ActionARCL::Result>();
       result->res_msg = std::string("push_command failed: ") + ex.what();
       goal_handle->abort(result);
       return;
     }
 
-    auto feedback = std::make_shared<ActionT::Feedback>();
-    auto result = std::make_shared<ActionT::Result>();
+    auto feedback = std::make_shared<ActionARCL::Feedback>();
+    auto result = std::make_shared<ActionARCL::Result>();
     auto start = std::chrono::steady_clock::now();
 
     while (rclcpp::ok())
@@ -471,18 +470,16 @@ private:
 
   // Service (driver)
   std::shared_ptr<SocketDriver> driver_;
-  rclcpp::Service<ServiceT>::SharedPtr srv_;
+  rclcpp::Service<ServiceARCL>::SharedPtr srv_;
 
   // Action (taskmaster)
   std::shared_ptr<SocketTaskmaster> task_master_;
-  rclcpp_action::Server<ActionT>::SharedPtr server_;
+  rclcpp_action::Server<ActionARCL>::SharedPtr action_;
+  std::thread action_thread_;
 
   // Publisher (listener)
   std::shared_ptr<SocketListener> listener_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
-
-  // Init deferral
-  rclcpp::TimerBase::SharedPtr init_timer_;
 
   // Pubs
   rclcpp::Publisher<amr_msgs::msg::Status>::SharedPtr status_pub_;
