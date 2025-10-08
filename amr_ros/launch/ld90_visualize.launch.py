@@ -41,42 +41,6 @@ def generate_launch_description():
         output='log',
         parameters=[robot_description],
     )
-
-    # Joints Publisher
-    joints_publisher_node = Node(
-        package='amr_description',
-        executable='joints_publisher',
-        output='screen',
-    )
-
-    # Data Points Marker
-    data_points_node = Node(
-        package='amr_description',
-        executable='data_points_marker',
-        output='screen',
-        parameters=[vis_config],
-    )
-        
-    # Goals Marker
-    goals_node = Node(
-        package='amr_description',
-        executable='goals_marker',
-        output='screen',
-    )
-    
-    # RViz goto point node
-    goto_point_node = Node(
-        package='amr_core',
-        executable='goto_point',
-        output='screen',
-    )
-    
-    # RViz goto point node
-    localize_at_point_node = Node(
-        package='amr_core',
-        executable='localize_at_point',
-        output='screen',
-    )
         
     map_node = Node(
         package='tf2_ros',
@@ -85,22 +49,10 @@ def generate_launch_description():
         output='log',
         arguments=['0.0', '0.0', '0.0', '0.0', '0.0', '0.0', 'map', 'pose']
     )
-    
-    laser_scans_node = Node(
-        package='amr_description',
-        executable='laser_scans',
-        output='screen',
-    )
 
     return LaunchDescription([
         robot_state_publisher, 
-        rviz_node, 
-        joints_publisher_node,
-        data_points_node,
-        goals_node,
-        goto_point_node,
-        localize_at_point_node,
-        map_node,
-        laser_scans_node
+        rviz_node,
+        map_node
         ])
 

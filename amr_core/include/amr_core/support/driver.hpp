@@ -9,6 +9,8 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "amr_core/socket/socket_driver.hpp"
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 
 /**
  * @brief ROS 2 ARCL driver node (without direct socket code).
@@ -32,11 +34,18 @@ public:
     // Parameters
     publish_odom_ = node_->declare_parameter<bool>("driver.publish_odom", true);
     subscribe_cmd_vel_ = node_->declare_parameter<bool>("driver.subscribe_cmd_vel", true);
+    subscribe_goal_pose_ = node_->declare_parameter<bool>("driver.subscribe_goal_pose", true);
+    subsrcibe_initial_pose_ = node_->declare_parameter<bool>("driver.subscribe_initial_pose", true);
+
     odom_topic_ = node_->declare_parameter<std::string>("driver.odom_topic", "amr/odom");
-    odom_frame_ = node_->declare_parameter<std::string>("driver.odom_frame", "odom");
-    base_frame_ = node_->declare_parameter<std::string>("driver.base_frame", "base_link");
     cmd_vel_topic_ = node_->declare_parameter<std::string>("driver.cmd_vel_topic", "amr/cmd_vel");
     odom_reset_topic = node_->declare_parameter<std::string>("driver.odom_reset_topic", "amr/odomReset");
+    goal_pose_topic_ = node_->declare_parameter<std::string>("driver.goal_pose_topic", "goal_pose");
+    initial_pose_topic_ = node_->declare_parameter<std::string>("driver.initial_pose_topic", "initialpose");
+
+    odom_frame_ = node_->declare_parameter<std::string>("driver.odom_frame", "odom");
+    base_frame_ = node_->declare_parameter<std::string>("driver.base_frame", "base_link");
+
     min_ang_speed_ = node_->declare_parameter<int>("driver.min_angular_speed", -30);   // deg/s
     max_ang_speed_ = node_->declare_parameter<int>("driver.max_angular_speed", 30);    // deg/s
     min_lin_speed_ = node_->declare_parameter<int>("driver.min_linear_speed", -1000);  // mm/s
@@ -56,6 +65,14 @@ public:
     if (subscribe_cmd_vel_)
       cmd_vel_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
           "amr/cmd_vel", 10, std::bind(&Driver::cmdVelCB, this, std::placeholders::_1));
+
+    if (subscribe_goal_pose_)
+      goal_pose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
+          goal_pose_topic_, 10, std::bind(&Driver::goalPoseCB, this, std::placeholders::_1));
+
+    if (subsrcibe_initial_pose_)
+      initial_pose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+          initial_pose_topic_, 10, std::bind(&Driver::initialPoseCB, this, std::placeholders::_1));
   }
 
   /**
@@ -217,6 +234,58 @@ private:
     }
   }
 
+  // Pose-based commands (from subscriptions)
+  void goalPoseCB(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+  {
+    const auto& p = msg->pose.position;
+    const auto& q = msg->pose.orientation;
+
+    int x_mm = static_cast<int>(std::lround(p.x * 1000.0));
+    int y_mm = static_cast<int>(std::lround(p.y * 1000.0));
+    int deg = static_cast<int>(std::lround(yaw_deg(q.w, q.x, q.y, q.z)));
+    if (deg > 180)
+      deg -= 360;
+
+    std::string cmd =
+        "doTask gotoPoint " + std::to_string(x_mm) + " " + std::to_string(y_mm) + " " + std::to_string(deg);
+    std::string identifier = { "Going to point" };
+
+    std::string response;
+    int req_id = socket_driver_->queue_command(cmd, identifier);
+    bool got_response = socket_driver_->wait_for_response(req_id, response, timeout_ms);
+    return;
+  }
+
+  void initialPoseCB(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
+  {
+    const auto& p = msg->pose.pose.position;
+    const auto& q = msg->pose.pose.orientation;
+
+    int x_mm = static_cast<int>(std::lround(p.x * 1000.0));
+    int y_mm = static_cast<int>(std::lround(p.y * 1000.0));
+    int deg = static_cast<int>(std::lround(yaw_deg(q.w, q.x, q.y, q.z)));
+    if (deg > 180)
+      deg -= 360;
+
+    // xySpread=0 angleSpread=0
+    std::string cmd =
+        "localizetopoint " + std::to_string(x_mm) + " " + std::to_string(y_mm) + " " + std::to_string(deg) + " 0 0";
+    std::string identifier = { "Localizing at point" };
+
+    std::string response;
+    int req_id = socket_driver_->queue_command(cmd, identifier);
+    bool got_response = socket_driver_->wait_for_response(req_id, response, timeout_ms);
+    return;
+  }
+
+  static double yaw_deg(double w, double x, double y, double z)
+  {
+    const double t3 = +2.0 * (w * z + x * y);
+    const double t4 = +1.0 - 2.0 * (y * y + z * z);
+    const double yaw = std::atan2(t3, t4);  // radians
+    return yaw * 180.0 / M_PI;
+  }
+
 private:
   rclcpp::Node::SharedPtr node_;
   std::shared_ptr<SocketDriver> socket_driver_;
@@ -224,11 +293,17 @@ private:
   // Parameters
   bool publish_odom_{ true };
   bool subscribe_cmd_vel_{ true };
+  bool subscribe_goal_pose_{ true };
+  bool subsrcibe_initial_pose_{ true };
+
   std::string odom_topic_{ "amr/odom" };
-  std::string odom_frame_{ "odom" };
-  std::string base_frame_{ "base_link" };
   std::string cmd_vel_topic_{ "amr/cmd_vel" };
   std::string odom_reset_topic{ "amr/odomReset" };
+  std::string goal_pose_topic_{ "goal_pose" };
+  std::string initial_pose_topic_{ "initialpose" };
+
+  std::string odom_frame_{ "odom" };
+  std::string base_frame_{ "base_link" };
   int timeout_ms{ 15000 };
 
   int min_lin_speed_{ -1000 };  // mm/s
@@ -240,6 +315,8 @@ private:
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr stop_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr odom_reset_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_sub_;
 
   // Publishers
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
