@@ -32,24 +32,6 @@ amr_core:
       range_max: 30.0
       use_intensity: false
 
-    goal_markers:
-      publish: true
-      topic: "goal_markers"
-      head_frame: "pose"
-      goals_a_colour: 1.0
-      goals_r_colour: 0.0
-      goals_g_colour: 1.0
-      goals_b_colour: 0.0
-      goal_texts_a_colour: 1.0
-      goal_texts_r_colour: 0.0
-      goal_texts_g_colour: 1.0
-      goal_texts_b_colour: 0.0
-
-    joint_states:
-      publish: true
-      topic: "joint_states"
-      frequency: 50
-
     driver:
       publish_odom: true
       subscribe_cmd_vel: true

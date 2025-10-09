@@ -190,13 +190,9 @@ private:
   {
     RCLCPP_INFO(node_->get_logger(), "Received cmd_vel: linear.x=%.2f angular.z=%.2f", msg.linear.x, msg.angular.z);
 
-    // Example: convert Twist to ARCL commands (similar logic as before).
-    int lin_m = static_cast<int>(msg.linear.x);
-    int ang_rad = static_cast<int>(msg.angular.z);
-
-    // additionally convert into mm/s and deg/s for ARCL commands since twist is in m/s and rad/s
-    int lin = lin_m * 1000;                                   // m/s to mm/s
-    int ang = static_cast<int>(ang_rad * (180.0 / 3.14159));  // rad/s to deg/s
+    // Convert into mm/s and deg/s for ARCL commands since twist is in m/s and rad/s
+    int lin = int(msg.linear.x * 1000);                // m/s to mm/s
+    int ang = int(msg.angular.z * (180.0 / 3.14159));  // rad/s to deg/s
 
     RCLCPP_INFO(node_->get_logger(), "Converted cmd_vel: linear=%d mm/s angular=%d deg/s", lin, ang);
 
@@ -221,7 +217,7 @@ private:
       int target = (ang * expected_cmd_vel_interval_) / 1000.0; // (deg/s * ms)/1000 -> deg
       int speed = std::abs(ang);
 
-      std::string cmd = "dotask deltaheading " + std::to_string(target) + " " + std::to_string(speed);
+      std::string cmd = "doTask deltaheading " + std::to_string(target) + " " + std::to_string(speed);
 
       RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
 
@@ -236,7 +232,7 @@ private:
       int target = (lin * expected_cmd_vel_interval_) / 1000.0; // (mm/s * ms)/1000 -> mm
       int speed = std::abs(lin);
 
-      std::string cmd = "dotask move " + std::to_string(target) + " " + std::to_string(speed);
+      std::string cmd = "doTask move " + std::to_string(target) + " " + std::to_string(speed);
 
       RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
 

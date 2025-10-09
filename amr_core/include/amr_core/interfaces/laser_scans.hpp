@@ -88,9 +88,6 @@ private:
       cloud_msg.points.push_back(pt);
     }
 
-    if (!point_cloud_pub)
-      point_cloud_pub = node_->create_publisher<sensor_msgs::msg::PointCloud>(topic_name_, 10);
-
     point_cloud_pub->publish(cloud_msg);
   }
 

@@ -19,8 +19,6 @@
 #include "amr_core/utils/amr_exception.hpp"
 #include "amr_core/interfaces/map_loader.hpp"
 #include "amr_core/interfaces/laser_scans.hpp"
-#include "amr_core/interfaces/joint_publisher.hpp"
-#include "amr_core/interfaces/goal_markers.hpp"
 #include "amr_core/interfaces/driver.hpp"
 #include "amr_core/interfaces/arcl_ros.hpp"
 
@@ -52,28 +50,6 @@ public:
     publish_source_ = this->declare_parameter<bool>("source_data.publish", false);
     publish_frequency_ = this->declare_parameter<int>("source_data.frequency", 5);
     pub_interval_ms_ = int(1000 / publish_frequency_);
-
-    // Publish source data from listener
-    if (publish_source_)
-    {
-      RCLCPP_INFO(this->get_logger(), "Publishing source data from listener enabled");
-
-      status_pub_ = this->create_publisher<amr_msgs::msg::Status>("amr/source/status", 10);
-      laser_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/laser", 10);
-      goals_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/all_goals", 10);
-      odom_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/odom", 10);
-      app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/application_fault_query", 10);
-      faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/faults_get", 10);
-      query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/query_faults", 10);
-    }
-    else
-    {
-      RCLCPP_INFO(this->get_logger(), "Publishing source data from listener is disabled");
-    }
-
-    // Publisher timer
-    pub_timer_ =
-        this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), std::bind(&CoreNode::on_pub_timer, this));
 
     // SocketDriver (low-level)
     RCLCPP_INFO(this->get_logger(), "Initializing SocketDriver..");
@@ -120,6 +96,28 @@ public:
       RCLCPP_ERROR(this->get_logger(), "SocketListener error: %s", ex.what());
     }
 
+    // Publish source data from listener
+    if (publish_source_)
+    {
+      RCLCPP_INFO(this->get_logger(), "Publishing source data from listener enabled");
+
+      status_pub_ = this->create_publisher<amr_msgs::msg::Status>("amr/source/status", 10);
+      laser_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/laser", 10);
+      goals_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/all_goals", 10);
+      odom_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/odom", 10);
+      app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/application_fault_query", 10);
+      faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/faults_get", 10);
+      query_faults_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/query_faults", 10);
+    }
+    else
+    {
+      RCLCPP_INFO(this->get_logger(), "Publishing source data from listener is disabled");
+    }
+
+    // Publisher timer
+    main_timer =
+        this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), std::bind(&CoreNode::main_loop, this));
+
     // Publish map data from file
     publish_map_ = this->declare_parameter<bool>("map_data.publish", false);
     if (publish_map_)
@@ -136,24 +134,6 @@ public:
       laser_scans_ = std::make_shared<LaserScans>(this->shared_from_this());
       laser_scans_->initialize();
       RCLCPP_INFO(this->get_logger(), "Publishing laser scans enabled");
-    }
-
-    // Publish goal markers
-    publish_goal_markers_ = this->declare_parameter<bool>("goal_markers.publish", false);
-    if (publish_goal_markers_)
-    {
-      goal_markers_ = std::make_shared<GoalMarkers>(this->shared_from_this(), driver_);
-      goal_markers_->initialize();
-      RCLCPP_INFO(this->get_logger(), "Publishing goal markers enabled");
-    }
-
-    // Publish joint states
-    publish_joints_ = this->declare_parameter<bool>("joint_states.publish", true);
-    if (publish_joints_)
-    {
-      joint_publisher_ = std::make_shared<JointsPublisher>(this->shared_from_this());
-      joint_publisher_->initialize();
-      RCLCPP_INFO(this->get_logger(), "Publishing joint states enabled");
     }
 
     // Driver
@@ -179,7 +159,7 @@ private:
    * @brief This function is called periodically by the publisher timer to poll the listener for new data and publish it
    * to topics.
    */
-  void on_pub_timer()
+  void main_loop()
   {
     // Poll listener for new data
     try
@@ -258,9 +238,6 @@ private:
 
     if (publish_source_ && status_pub_)
       status_pub_->publish(status_msg);
-
-    if (publish_joints_ && joint_publisher_)
-      joint_publisher_->update(status_msg);
   }
 
   void pub_laser()
@@ -298,9 +275,6 @@ private:
       msg.data = joined;
       if (publish_source_ && goals_pub_)
         goals_pub_->publish(msg);
-
-      if (publish_goal_markers_)
-        goal_markers_->update(msg, timeout_ms_);
     }
     catch (const std::out_of_range&)
     {
@@ -421,7 +395,7 @@ private:
 
   // Publisher (listener)
   std::shared_ptr<SocketListener> listener_;
-  rclcpp::TimerBase::SharedPtr pub_timer_;
+  rclcpp::TimerBase::SharedPtr main_timer;
 
   // Source Pubs
   rclcpp::Publisher<amr_msgs::msg::Status>::SharedPtr status_pub_;
@@ -439,14 +413,6 @@ private:
   // Laser scans
   bool publish_laser_scans_{ false };
   std::shared_ptr<LaserScans> laser_scans_;
-
-  // Goal markers
-  bool publish_goal_markers_{ false };
-  std::shared_ptr<GoalMarkers> goal_markers_;
-
-  // Joint states
-  bool publish_joints_{ false };
-  std::shared_ptr<JointsPublisher> joint_publisher_;
 
   // Driver
   std::shared_ptr<Driver> odom_driver_;
