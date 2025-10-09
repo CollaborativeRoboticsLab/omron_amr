@@ -46,11 +46,14 @@ public:
     odom_frame_ = node_->declare_parameter<std::string>("driver.odom_frame", "odom");
     base_frame_ = node_->declare_parameter<std::string>("driver.base_frame", "base_link");
 
+    expected_cmd_vel_freq_ = node_->declare_parameter<double>("driver.expected_cmd_vel_freq", 20.0);
     min_ang_speed_ = node_->declare_parameter<int>("driver.min_angular_speed", -30);   // deg/s
     max_ang_speed_ = node_->declare_parameter<int>("driver.max_angular_speed", 30);    // deg/s
     min_lin_speed_ = node_->declare_parameter<int>("driver.min_linear_speed", -1000);  // mm/s
     max_lin_speed_ = node_->declare_parameter<int>("driver.max_linear_speed", 1000);   // mm/s
     timeout_ms = node_->declare_parameter<int>("driver.command_timeout_ms", 15000);
+
+    expected_cmd_vel_interval_ = int(1000 / expected_cmd_vel_freq_);
 
     // Publishers
     if (publish_odom_)
@@ -185,6 +188,8 @@ private:
 
   void cmdVelCB(const geometry_msgs::msg::Twist& msg)
   {
+    RCLCPP_INFO(node_->get_logger(), "Received cmd_vel: linear.x=%.2f angular.z=%.2f", msg.linear.x, msg.angular.z);
+
     // Example: convert Twist to ARCL commands (similar logic as before).
     int lin_m = static_cast<int>(msg.linear.x);
     int ang_rad = static_cast<int>(msg.angular.z);
@@ -192,6 +197,8 @@ private:
     // additionally convert into mm/s and deg/s for ARCL commands since twist is in m/s and rad/s
     int lin = lin_m * 1000;                                   // m/s to mm/s
     int ang = static_cast<int>(ang_rad * (180.0 / 3.14159));  // rad/s to deg/s
+
+    RCLCPP_INFO(node_->get_logger(), "Converted cmd_vel: linear=%d mm/s angular=%d deg/s", lin, ang);
 
     // Clamp values to min/max
     lin = std::clamp(lin, min_lin_speed_, max_lin_speed_);
@@ -210,10 +217,13 @@ private:
     }
     else if (std::abs(ang) > 0)
     {
-      int target = (ang > 0) ? 1440 : -1440;
+      // int target = (ang > 0) ? 1440 : -1440;
+      int target = (ang * expected_cmd_vel_interval_) / 1000.0; // (deg/s * ms)/1000 -> deg
       int speed = std::abs(ang);
 
       std::string cmd = "dotask deltaheading " + std::to_string(target) + " " + std::to_string(speed);
+
+      RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
 
       std::string response;
       int req_id = socket_driver_->queue_command(cmd, "");
@@ -222,10 +232,13 @@ private:
     }
     else if (std::abs(lin) > 0)
     {
-      int target = (lin > 0) ? 10000 : -10000;
+      // int target = (lin > 0) ? 10000 : -10000;
+      int target = (lin * expected_cmd_vel_interval_) / 1000.0; // (mm/s * ms)/1000 -> mm
       int speed = std::abs(lin);
 
       std::string cmd = "dotask move " + std::to_string(target) + " " + std::to_string(speed);
+
+      RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
 
       std::string response;
       int req_id = socket_driver_->queue_command(cmd, "");
@@ -306,6 +319,8 @@ private:
   std::string base_frame_{ "base_link" };
   int timeout_ms{ 15000 };
 
+  int expected_cmd_vel_freq_{ 20 }; // Hz
+  int expected_cmd_vel_interval_{ 100 }; // ms
   int min_lin_speed_{ -1000 };  // mm/s
   int max_lin_speed_{ 1000 };   // mm/s
   int min_ang_speed_{ -30 };    // deg/s

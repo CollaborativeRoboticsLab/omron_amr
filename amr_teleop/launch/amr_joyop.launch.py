@@ -1,35 +1,36 @@
 import os
-from launch import LaunchDescription
-from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+
 from ament_index_python.packages import get_package_share_directory
 
+import launch
+import launch_ros.actions
+
+
 def generate_launch_description():
-    ld = LaunchDescription()
+    joy_config = launch.substitutions.LaunchConfiguration('joy_config')
+    joy_dev = launch.substitutions.LaunchConfiguration('joy_dev')
+    publish_stamped_twist = launch.substitutions.LaunchConfiguration('publish_stamped_twist')
+    config_filepath = launch.substitutions.LaunchConfiguration('config_filepath')
 
-    teleop_config = os.path.join( get_package_share_directory('amr_joyop'), 'config', 'teleop.yaml')
+    return launch.LaunchDescription([
+        launch.actions.DeclareLaunchArgument('joy_vel', default_value='amr/cmd_vel'),
+        launch.actions.DeclareLaunchArgument('joy_config', default_value='ps3'),
+        launch.actions.DeclareLaunchArgument('joy_dev', default_value='0'),
+        launch.actions.DeclareLaunchArgument('publish_stamped_twist', default_value='false'),
+        launch.actions.DeclareLaunchArgument('config_filepath', default_value=os.path.join(get_package_share_directory('amr_teleop'), 'config', 'teleop.yaml')),
 
-    joystickNode=Node(
-            package='joy',
-            namespace='',
-            executable='joy_node',
-            name='joy_node',
-            parameters=[{'dev': '/dev/input/js0', 'deadzone': 0.3, 'autorepeat_rate': 20.0}],
-            arguments=['--ros-args', '--log-level', 'info']
-    )
-
-    teleopJoystickNode=Node(
-            package='teleop_twist_joy',
-            namespace='',
-            executable='teleop_node',
+        launch_ros.actions.Node(
+            package='joy', executable='joy_node', name='joy_node',
+            parameters=[{
+                'device_id': joy_dev,
+                'deadzone': 0.3,
+                'autorepeat_rate': 20.0,
+            }, config_filepath]),
+            
+        launch_ros.actions.Node(
+            package='teleop_twist_joy', executable='teleop_node',
             name='teleop_twist_joy_node',
-            parameters=[teleop_config],
-            remappings=[('/cmd_vel', 'amr/cmd_vel')],
-            arguments=['--ros-args', '--log-level', 'info']
-    )
-
-    ld.add_action(joystickNode)
-    ld.add_action(teleopJoystickNode)
-    
-    return ld
+            parameters=[config_filepath, {'publish_stamped_twist': publish_stamped_twist}],
+            remappings={('/cmd_vel', launch.substitutions.LaunchConfiguration('joy_vel'))},
+            ),
+    ])

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/laser_scan.hpp"
+#include "sensor_msgs/msg/point_cloud.hpp"
 #include "std_msgs/msg/string.hpp"
 #include <sstream>
 #include <string>
@@ -41,7 +41,7 @@ public:
     range_max_ = node_->declare_parameter<double>("laser_scans.range_max", 30.0);                // default 30m
     time_increment_ = node_->declare_parameter<double>("laser_scans.time_increment", 0.0);       // default 0
 
-    laser_scan_pub = node_->create_publisher<sensor_msgs::msg::LaserScan>(topic_name_, 10);
+    point_cloud_pub = node_->create_publisher<sensor_msgs::msg::PointCloud>(topic_name_, 10);
   }
 
   void update(const std_msgs::msg::String& msg)
@@ -61,44 +61,40 @@ public:
       {
         vals_str.clear();
       }
-      publish_laser_scan(vals_str);
+      publish_point_cloud(vals_str);
     }
   }
 
 private:
   /**
-   * @brief Parses the laser scan string and publishes a LaserScan message.
+   * @brief Parses the laser scan string and publishes a PointCloud message.
    * @param vals_str String containing laser scan values.
    */
-  void publish_laser_scan(const std::string& vals_str)
+  void publish_point_cloud(const std::string& vals_str)
   {
-    sensor_msgs::msg::LaserScan scan_msg;
-    scan_msg.header.stamp = node_->now();
-    scan_msg.header.frame_id = "laser_frame";  // Change as needed
+    sensor_msgs::msg::PointCloud cloud_msg;
+    cloud_msg.header.stamp = node_->now();
+    cloud_msg.header.frame_id = frame_id_;  // Use configured frame
 
-    scan_msg.angle_min = angle_min_;
-    scan_msg.angle_max = angle_max_;
-    scan_msg.angle_increment = angle_increment_;
-    scan_msg.time_increment = time_increment_;
-    scan_msg.scan_time = scan_time_;
-    scan_msg.range_min = range_min_;
-    scan_msg.range_max = range_max_;
-
-    // Parse x y pairs and fill ranges (assume y is ignored, x is distance)
+    // Parse x y pairs and fill points
     std::istringstream iss(vals_str);
     double x, y;
-    std::vector<float> ranges;
     while (iss >> x >> y)
     {
-      ranges.push_back(static_cast<float>(x / 1000.0));  // Convert mm to meters
+      geometry_msgs::msg::Point32 pt;
+      pt.x = static_cast<float>(x / 1000.0);  // Convert mm to meters
+      pt.y = static_cast<float>(y / 1000.0);
+      pt.z = 0.0;
+      cloud_msg.points.push_back(pt);
     }
-    scan_msg.ranges = ranges;
 
-    laser_scan_pub->publish(scan_msg);
+    if (!point_cloud_pub)
+      point_cloud_pub = node_->create_publisher<sensor_msgs::msg::PointCloud>(topic_name_, 10);
+
+    point_cloud_pub->publish(cloud_msg);
   }
 
-  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laser_scan_pub;  ///< Publisher for LaserScan
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr laser_data_sub;     ///< Subscription for laser scan data
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr point_cloud_pub;  ///< Publisher for LaserScan
   rclcpp::Node::SharedPtr node_;
 
   std::string frame_id_{ "laser_frame" };

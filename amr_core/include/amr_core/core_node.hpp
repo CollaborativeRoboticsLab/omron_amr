@@ -12,29 +12,23 @@
 #include <std_msgs/msg/string.hpp>
 #include <amr_msgs/msg/status.hpp>
 #include <amr_msgs/msg/location.hpp>
-#include <amr_msgs/srv/arcl_api.hpp>
-#include <amr_msgs/action/action.hpp>
 
 #include "amr_core/socket/socket_listener.hpp"
 #include "amr_core/socket/socket_driver.hpp"
 #include "amr_core/socket/socket_taskmaster.hpp"
-#include "amr_core/utils/parser.hpp"
 #include "amr_core/utils/amr_exception.hpp"
-#include "amr_core/support/map_loader.hpp"
-#include "amr_core/support/laser_scans.hpp"
-#include "amr_core/support/joint_publisher.hpp"
-#include "amr_core/support/goal_markers.hpp"
-#include "amr_core/support/driver.hpp"
+#include "amr_core/interfaces/map_loader.hpp"
+#include "amr_core/interfaces/laser_scans.hpp"
+#include "amr_core/interfaces/joint_publisher.hpp"
+#include "amr_core/interfaces/goal_markers.hpp"
+#include "amr_core/interfaces/driver.hpp"
+#include "amr_core/interfaces/arcl_ros.hpp"
 
 using namespace std::chrono_literals;
 
 class CoreNode : public rclcpp::Node
 {
 public:
-  using ServiceARCL = amr_msgs::srv::ArclApi;
-  using ActionARCL = amr_msgs::action::Action;
-  using GoalHandle = rclcpp_action::ServerGoalHandle<ActionARCL>;
-
   CoreNode() : rclcpp::Node("core_node")
   {
   }
@@ -54,18 +48,6 @@ public:
     host_ip_ = this->declare_parameter<std::string>("host.ip", ip_);
     host_port_ = this->declare_parameter<int>("host.port", port_);
 
-    // Service
-    enable_service_ = this->declare_parameter<bool>("service.enable", false);
-    svc_timeout_ms_ = this->declare_parameter<int>("service.timeout_ms", 15000);
-    if (!enable_service_)
-      RCLCPP_WARN(this->get_logger(), "Service server is disabled");
-
-    // Action
-    enable_actions_ = this->declare_parameter<bool>("action.enable", false);
-    if (!enable_actions_)
-      RCLCPP_WARN(this->get_logger(), "Action server is disabled");
-
-    // Publisher params
     // Publish source data from listener
     publish_source_ = this->declare_parameter<bool>("source_data.publish", false);
     publish_frequency_ = this->declare_parameter<int>("source_data.frequency", 5);
@@ -89,7 +71,11 @@ public:
       RCLCPP_INFO(this->get_logger(), "Publishing source data from listener is disabled");
     }
 
-    // Srvice: SocketDriver (low-level)
+    // Publisher timer
+    pub_timer_ =
+        this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), std::bind(&CoreNode::on_pub_timer, this));
+
+    // SocketDriver (low-level)
     RCLCPP_INFO(this->get_logger(), "Initializing SocketDriver..");
     try
     {
@@ -104,7 +90,7 @@ public:
       RCLCPP_ERROR(this->get_logger(), "SocketDriver initialization failed: %s", e.what());
     }
 
-    // Action server: SocketTaskmaster (high-level)
+    // SocketTaskmaster (high-level)
     RCLCPP_INFO(this->get_logger(), "Initializing SocketTaskmaster..");
     try
     {
@@ -116,10 +102,10 @@ public:
     }
     catch (const amr_exception& ex)
     {
-      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster init failed: %s", ex.what());
+      RCLCPP_FATAL(this->get_logger(), "SocketTaskmaster initialization failed: %s", ex.what());
     }
 
-    // Publisher: SocketListener
+    // SocketListener
     RCLCPP_INFO(this->get_logger(), "Initializing SocketListener..");
     try
     {
@@ -174,225 +160,20 @@ public:
     odom_driver_ = std::make_shared<Driver>(this->shared_from_this(), driver_);
     odom_driver_->initialize();
 
-    // Enable or disable service server
-    if (enable_service_ && driver_)
-      srv_ = this->create_service<ServiceARCL>(
-          "arcl_api_service", std::bind(&CoreNode::handle_service, this, std::placeholders::_1, std::placeholders::_2));
-    else if (enable_service_ && !driver_)
-      RCLCPP_ERROR(this->get_logger(), "Service server is enabled but driver is not available");
-    else
-      RCLCPP_ERROR(this->get_logger(), "Service server is disabled");
-
-    // Enable or disable action server
-    if (enable_actions_ && task_master_)
-      action_ = rclcpp_action::create_server<ActionARCL>(
-          this->shared_from_this(), "arcl_api_action",
-          std::bind(&CoreNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-          std::bind(&CoreNode::handle_cancel, this, std::placeholders::_1),
-          std::bind(&CoreNode::handle_accepted, this, std::placeholders::_1));
-    else if (enable_actions_ && !task_master_)
-      RCLCPP_ERROR(this->get_logger(), "Action server is enabled but taskmaster is not available");
-    else
-      RCLCPP_ERROR(this->get_logger(), "Action server is disabled");
-
-    // Publisher timer
-    pub_timer_ =
-        this->create_wall_timer(std::chrono::milliseconds(pub_interval_ms_), std::bind(&CoreNode::on_pub_timer, this));
+    // ARCL service + action
+    enable_arcl_access_ = this->declare_parameter<bool>("arcl.enable", false);
+    timeout_ms_ = this->declare_parameter<int>("arcl.timeout_ms", 15000);
+    if (enable_arcl_access_)
+    {
+      RCLCPP_INFO(this->get_logger(), "ARCL interface is enabled");
+      arcl_ros = std::make_shared<Arcl_ROS>(this->shared_from_this(), driver_, task_master_, timeout_ms_);
+      arcl_ros->initialize();
+    }
 
     RCLCPP_INFO(this->get_logger(), "CoreNode initialized");
   }
 
 private:
-  /**
-   * @brief This function handles incoming service requests to send ARCL commands to the robot.
-   */
-  void handle_service(const std::shared_ptr<ServiceARCL::Request> req, std::shared_ptr<ServiceARCL::Response> resp)
-  {
-    std::string response;
-    bool got_response;
-
-    // Check driver availability
-    if (!driver_)
-    {
-      response = "ERROR: driver not available";
-      got_response = true;
-    }
-    // Send command to robot
-    else
-    {
-      int req_id = driver_->queue_command(req->command, req->line_identifier);
-      got_response = driver_->wait_for_response(req_id, response, svc_timeout_ms_);
-    }
-
-    // Delegate queueing and response handling to SocketDriver
-    if (got_response)
-      resp->response = response;
-    else
-      resp->response = "TIMEOUT";
-  }
-
-  // -------- Action server (SocketTaskmaster) --------
-  /**
-   * @brief This function is called when a new goal is received by the action server.
-   *
-   * @param uuid The unique identifier for the goal.
-   * @param goal The goal message containing the command and identifiers.
-   * @return rclcpp_action::GoalResponse Indicates whether the goal is accepted or rejected
-   */
-  rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID&, std::shared_ptr<const ActionARCL::Goal>)
-  {
-    return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
-  }
-
-  /**
-   * @brief This function is called when a goal is requested to be canceled by the action client.
-   *
-   * @param goal_handle The handle of the goal to be canceled.
-   * @return rclcpp_action::CancelResponse Indicates whether the cancel request is accepted or rejected.
-   */
-  rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandle>)
-  {
-    return rclcpp_action::CancelResponse::ACCEPT;
-  }
-
-  /**
-   * @brief This function is called when a new goal is accepted by the action server.
-   *
-   * @param goal_handle The handle of the accepted goal.
-   */
-  void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle)
-  {
-    action_thread_ = std::thread(&CoreNode::execute, this, goal_handle);
-    action_thread_.detach();
-  }
-
-  /**
-   * @brief This function executes the action goal by sending commands to the robot and processing feedback.
-   *
-   * @param goal_handle The handle of the accepted goal.
-   */
-  void execute(const std::shared_ptr<GoalHandle> goal_handle)
-  {
-    // Check taskmaster availability
-    if (!task_master_)
-    {
-      auto result = std::make_shared<ActionARCL::Result>();
-      result->res_msg = "Taskmaster unavailable";
-      goal_handle->abort(result);
-      return;
-    }
-
-    Parser parser;
-
-    // Get goal details
-    auto goal = goal_handle->get_goal();
-
-    std::vector<std::string> end_lines;
-
-    // Use first identifier as end line if available
-    if (!goal->identifier.empty())
-      end_lines.emplace_back(goal->identifier.front());
-
-    try
-    {
-      // Send command to robot
-      task_master_->push_command(goal->command, true, end_lines);
-    }
-    catch (const amr_exception& ex)
-    {
-      // Failed to send command
-      RCLCPP_ERROR(this->get_logger(), "push_command error: %s", ex.what());
-
-      auto result = std::make_shared<ActionARCL::Result>();
-      result->res_msg = std::string("push_command failed: ") + ex.what();
-      goal_handle->abort(result);
-      return;
-    }
-
-    auto feedback = std::make_shared<ActionARCL::Feedback>();
-    auto result = std::make_shared<ActionARCL::Result>();
-    auto start = std::chrono::steady_clock::now();
-
-    while (rclcpp::ok())
-    {
-      // Check for cancelation
-      if (goal_handle->is_canceling())
-      {
-        result->res_msg = "Canceled";
-        goal_handle->canceled(result);
-        return;
-      }
-
-      // Wait for feedback or completion
-      SocketTaskmaster::WaitResult wr{ false, "", "" };
-      try
-      {
-        wr = task_master_->wait_command(100);
-      }
-      catch (const amr_exception& ex)
-      {
-        // Failed to get feedback
-        RCLCPP_ERROR(this->get_logger(), "wait_command error: %s", ex.what());
-
-        result->res_msg = std::string("wait_command error: ") + ex.what();
-        goal_handle->abort(result);
-        return;
-      }
-
-      // Handle lack of feedback or no goal
-      if (!wr.feedback.empty() && wr.feedback.find("No goal") != std::string::npos)
-      {
-        result->res_msg = "No such goal";
-        goal_handle->abort(result);
-        return;
-      }
-
-      // Process feedback or completion
-      if (wr.complete)
-      {
-        feedback->feed_msg = wr.feedback;
-        goal_handle->publish_feedback(feedback);
-        result->res_msg = wr.result;
-        goal_handle->succeed(result);
-        RCLCPP_INFO(this->get_logger(), "action_server: %s", result->res_msg.c_str());
-        return;
-      }
-      else if (!wr.feedback.empty())
-      {
-        auto pr = parser.process_arcl_server(wr.feedback);
-        feedback->feed_msg = pr.message;
-        goal_handle->publish_feedback(feedback);
-
-        if (pr.code == Parser::Code::PASS)
-        {
-          result->res_msg = pr.message;
-          goal_handle->succeed(result);
-          return;
-        }
-        else if (pr.code == Parser::Code::FAIL)
-        {
-          result->res_msg = pr.message;
-          goal_handle->abort(result);
-          return;
-        }
-      }
-      // Check for timeout
-      if (std::chrono::steady_clock::now() - start > std::chrono::minutes(10))
-      {
-        result->res_msg = "Timeout";
-        goal_handle->abort(result);
-        return;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    if (goal_handle->is_active())
-    {
-      result->res_msg = "Node shutdown";
-      goal_handle->abort(result);
-    }
-  }
-
   // -------- Publisher (SocketListener -> topics) --------
   /**
    * @brief This function is called periodically by the publisher timer to poll the listener for new data and publish it
@@ -519,7 +300,7 @@ private:
         goals_pub_->publish(msg);
 
       if (publish_goal_markers_)
-        goal_markers_->update(msg, svc_timeout_ms_);
+        goal_markers_->update(msg, timeout_ms_);
     }
     catch (const std::out_of_range&)
     {
@@ -622,7 +403,6 @@ private:
   std::string ip_;
   int port_{ 0 };
   std::string passwd_;
-  int svc_timeout_ms_{ 15000 };
   int publish_frequency_{ 5 };
   int pub_interval_ms_{ 200 };
 
@@ -631,17 +411,13 @@ private:
 
   bool publish_source_{ false };
 
-  bool enable_actions_{ false };
-  bool enable_service_{ false };
+  bool enable_arcl_access_{ false };
 
   // Service (driver)
   std::shared_ptr<SocketDriver> driver_;
-  rclcpp::Service<ServiceARCL>::SharedPtr srv_;
 
   // Action (taskmaster)
   std::shared_ptr<SocketTaskmaster> task_master_;
-  rclcpp_action::Server<ActionARCL>::SharedPtr action_;
-  std::thread action_thread_;
 
   // Publisher (listener)
   std::shared_ptr<SocketListener> listener_;
@@ -674,4 +450,8 @@ private:
 
   // Driver
   std::shared_ptr<Driver> odom_driver_;
+
+  // ARCL ROS interface
+  std::shared_ptr<Arcl_ROS> arcl_ros;
+  int timeout_ms_{ 15000 };
 };
