@@ -214,31 +214,27 @@ private:
     else if (std::abs(ang) > 0)
     {
       // int target = (ang > 0) ? 1440 : -1440;
-      int target = (ang * expected_cmd_vel_interval_) / 1000.0; // (deg/s * ms)/1000 -> deg
+      int target = (ang * expected_cmd_vel_interval_) / 1000.0;  // (deg/s * ms)/1000 -> deg
       int speed = std::abs(ang);
 
       std::string cmd = "doTask deltaheading " + std::to_string(target) + " " + std::to_string(speed);
 
       RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
 
-      std::string response;
-      int req_id = socket_driver_->queue_command(cmd, "");
-      bool got_response = socket_driver_->wait_for_response(req_id, response, timeout_ms);
+      socket_driver_->send_command(cmd, true);
       return;
     }
     else if (std::abs(lin) > 0)
     {
       // int target = (lin > 0) ? 10000 : -10000;
-      int target = (lin * expected_cmd_vel_interval_) / 1000.0; // (mm/s * ms)/1000 -> mm
+      int target = (lin * expected_cmd_vel_interval_) / 1000.0;  // (mm/s * ms)/1000 -> mm
       int speed = std::abs(lin);
 
       std::string cmd = "doTask move " + std::to_string(target) + " " + std::to_string(speed);
 
       RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
 
-      std::string response;
-      int req_id = socket_driver_->queue_command(cmd, "");
-      bool got_response = socket_driver_->wait_for_response(req_id, response, timeout_ms);
+      socket_driver_->send_command(cmd, true);
       return;
     }
   }
@@ -315,12 +311,12 @@ private:
   std::string base_frame_{ "base_link" };
   int timeout_ms{ 15000 };
 
-  int expected_cmd_vel_freq_{ 20 }; // Hz
-  int expected_cmd_vel_interval_{ 100 }; // ms
-  int min_lin_speed_{ -1000 };  // mm/s
-  int max_lin_speed_{ 1000 };   // mm/s
-  int min_ang_speed_{ -30 };    // deg/s
-  int max_ang_speed_{ 30 };     // deg/s
+  int expected_cmd_vel_freq_{ 20 };       // Hz
+  int expected_cmd_vel_interval_{ 100 };  // ms
+  int min_lin_speed_{ -1000 };            // mm/s
+  int max_lin_speed_{ 1000 };             // mm/s
+  int min_ang_speed_{ -30 };              // deg/s
+  int max_ang_speed_{ 30 };               // deg/s
 
   // Subscribers
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr stop_sub_;

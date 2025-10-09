@@ -378,6 +378,30 @@ public:
   }
 
   // --- ARCL API Service Command Queue ---
+  /**
+   * @brief Send a command line immediately to the socket (no response wait).
+   * @param command Command string to send.
+   * @param newline If true, appends CRLF.
+   */
+  void send_command(const std::string& command, bool newline = true)
+  {
+    send_line(command, newline);
+
+    // flush the buffer immediately:
+    poll_once(0);
+  }
+
+  /**
+   * @brief Queue a command for sending and response matching.
+   * @param command Command string to send.
+   * @param line_identifier Substring to match in response line.
+   * @param newline If true, appends CRLF.
+   * @return unique command ID for wait_for_response().
+   *
+   * The command is queued for sending; the next available command in the
+   * queue is sent on each poll_and_process() call. Responses are matched
+   * by searching for line_identifier in received lines.
+   */
   int queue_command(const std::string& command, const std::string& line_identifier, bool newline = true)
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
@@ -404,6 +428,17 @@ public:
     return current_id;
   }
 
+  /**
+   * @brief Wait for a queued command's response line or timeout.
+   * @param id Command ID returned by queue_command().
+   * @param response On success, set to the matched response line.
+   * @param timeout_ms Timeout in milliseconds.
+   * @return true if response received; false on timeout.
+   *
+   * This method polls and processes I/O until the command's response
+   * is received or the timeout expires. On success, the matched response
+   * line is returned (without CRLF) via the response parameter.
+   */
   bool wait_for_response(int id, std::string& response, int timeout_ms)
   {
     auto start = std::chrono::steady_clock::now();
