@@ -18,13 +18,13 @@
 /**
  * @brief Publishes map grid and forbidden areas as MarkerArray for RViz visualization.
  */
-class MapLoader
+class MapFileInterface
 {
 public:
   /**
    * @brief Constructor. Initializes publishers, loads map data, and starts timer.
    */
-  MapLoader(rclcpp::Node::SharedPtr node)
+  MapFileInterface(rclcpp::Node::SharedPtr node)
   {
     node_ = node;
   }
@@ -43,7 +43,7 @@ public:
     map_pub = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(map_topic_, 10);
     fa_pub = node_->create_publisher<visualization_msgs::msg::MarkerArray>("forbidden_areas", 10);
     timer = node_->create_wall_timer(std::chrono::milliseconds(map_pub_interval_ms_),
-                                      std::bind(&MapLoader::publish_map, this));
+                                      std::bind(&MapFileInterface::publish_map, this));
 
     set_forbidden_area_params();
 
@@ -52,14 +52,12 @@ public:
       RCLCPP_ERROR(node_->get_logger(), "Reading map failed");
     }
 
-    RCLCPP_INFO(node_->get_logger(), "Waiting for RVIZ");
-
     get_min_max_coordinates();
     set_grid_attributes();
     initialize_map();
     fill_map();
 
-    RCLCPP_INFO(node_->get_logger(), "MapLoader initialized");
+    RCLCPP_INFO(node_->get_logger(), "MapFileInterface initialized");
   }
 
 

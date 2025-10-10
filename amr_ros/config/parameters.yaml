@@ -46,10 +46,12 @@ amr_core:
       base_frame: "base_link"
       expected_cmd_vel_freq: 20.0
       command_timeout_ms: 15000
-      min_linear_speed: -1000  # mm/s
-      max_linear_speed: 1000   # mm/s
-      min_angular_speed: -30    # deg/s
-      max_angular_speed: 30     # deg/s
+      min_linear_speed: -1000.0  # mm/s
+      max_linear_speed: 1000.0   # mm/s
+      min_angular_speed: -30.0    # deg/s
+      max_angular_speed: 30.0     # deg/s
+      unit_move_distance: 50.0   # mm
+      unit_turn_angle: 5.0       # deg
 
     arcl:
       enable: false

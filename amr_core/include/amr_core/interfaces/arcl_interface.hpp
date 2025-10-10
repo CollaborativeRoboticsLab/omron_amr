@@ -16,7 +16,7 @@
  * @brief ROS 2 ARCL driver node (without direct socket code).
  * Uses SocketDriver for ARCL communication.
  */
-class Arcl_ROS
+class ARCL_Interface
 {
 public:
   using ServiceARCL = amr_msgs::srv::ArclApi;
@@ -27,7 +27,7 @@ public:
    * @brief Constructor. Initializes publishers, subscribers, and parameters.
    * @param node Shared pointer to rclcpp::Node.
    */
-  Arcl_ROS(rclcpp::Node::SharedPtr node, std::shared_ptr<SocketDriver> driver,
+  ARCL_Interface(rclcpp::Node::SharedPtr node, std::shared_ptr<SocketDriver> driver,
            std::shared_ptr<SocketTaskmaster> taskmaster, int service_timeout_ms = 15000)
   {
     node_ = node;
@@ -41,7 +41,7 @@ public:
     // Service server
     if (!socket_driver_)
       service_ = node_->create_service<ServiceARCL>(
-          "arcl_api_service", std::bind(&Arcl_ROS::handle_service, this, std::placeholders::_1, std::placeholders::_2));
+          "arcl_api_service", std::bind(&ARCL_Interface::handle_service, this, std::placeholders::_1, std::placeholders::_2));
     else
       RCLCPP_ERROR(node_->get_logger(), "Service server not created: driver unavailable");
 
@@ -49,9 +49,9 @@ public:
     if (socket_taskmaster_)
       action_server_ = rclcpp_action::create_server<ActionARCL>(
           node_, "arcl_api_action",
-          std::bind(&Arcl_ROS::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-          std::bind(&Arcl_ROS::handle_cancel, this, std::placeholders::_1),
-          std::bind(&Arcl_ROS::handle_accepted, this, std::placeholders::_1));
+          std::bind(&ARCL_Interface::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+          std::bind(&ARCL_Interface::handle_cancel, this, std::placeholders::_1),
+          std::bind(&ARCL_Interface::handle_accepted, this, std::placeholders::_1));
     else
       RCLCPP_ERROR(node_->get_logger(), "Action server not created: taskmaster unavailable");
   }
@@ -116,7 +116,7 @@ private:
    */
   void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle)
   {
-    action_thread_ = std::thread(&Arcl_ROS::execute, this, goal_handle);
+    action_thread_ = std::thread(&ARCL_Interface::execute, this, goal_handle);
     action_thread_.detach();
   }
 

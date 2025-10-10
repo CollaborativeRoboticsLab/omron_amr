@@ -17,10 +17,10 @@
 #include "amr_core/socket/socket_driver.hpp"
 #include "amr_core/socket/socket_taskmaster.hpp"
 #include "amr_core/utils/amr_exception.hpp"
-#include "amr_core/interfaces/map_loader.hpp"
-#include "amr_core/interfaces/laser_scans.hpp"
-#include "amr_core/interfaces/driver.hpp"
-#include "amr_core/interfaces/arcl_ros.hpp"
+#include "amr_core/interfaces/map_file_interface.hpp"
+#include "amr_core/interfaces/laser_interface.hpp"
+#include "amr_core/interfaces/drive_interface.hpp"
+#include "amr_core/interfaces/arcl_interface.hpp"
 
 using namespace std::chrono_literals;
 
@@ -122,7 +122,7 @@ public:
     publish_map_ = this->declare_parameter<bool>("map_data.publish", false);
     if (publish_map_)
     {
-      data_point_marker_ = std::make_shared<MapLoader>(this->shared_from_this());
+      data_point_marker_ = std::make_shared<MapFileInterface>(this->shared_from_this());
       data_point_marker_->initialize();
       RCLCPP_INFO(this->get_logger(), "Publishing map data from file enabled");
     }
@@ -131,13 +131,13 @@ public:
     publish_laser_scans_ = this->declare_parameter<bool>("laser_scans.publish", true);
     if (publish_laser_scans_)
     {
-      laser_scans_ = std::make_shared<LaserScans>(this->shared_from_this());
+      laser_scans_ = std::make_shared<LaserInterface>(this->shared_from_this());
       laser_scans_->initialize();
       RCLCPP_INFO(this->get_logger(), "Publishing laser scans enabled");
     }
 
-    // Driver
-    odom_driver_ = std::make_shared<Driver>(this->shared_from_this(), driver_);
+    // DriverInterface
+    odom_driver_ = std::make_shared<DriverInterface>(this->shared_from_this(), driver_);
     odom_driver_->initialize();
 
     // ARCL service + action
@@ -146,9 +146,17 @@ public:
     if (enable_arcl_access_)
     {
       RCLCPP_INFO(this->get_logger(), "ARCL interface is enabled");
-      arcl_ros = std::make_shared<Arcl_ROS>(this->shared_from_this(), driver_, task_master_, timeout_ms_);
+      arcl_ros = std::make_shared<ARCL_Interface>(this->shared_from_this(), driver_, task_master_, timeout_ms_);
       arcl_ros->initialize();
     }
+
+    // Reset odometer
+    RCLCPP_INFO(this->get_logger(), "Resetting odometer..");
+    std::string response;
+    int req_id = driver_->queue_command("odometerReset", "");
+    bool got_response = driver_->wait_for_response(req_id, response, timeout_ms_);
+    if (!got_response)
+      RCLCPP_INFO(this->get_logger(), "Reset result: %s", response.c_str());
 
     RCLCPP_INFO(this->get_logger(), "CoreNode initialized");
   }
@@ -408,16 +416,16 @@ private:
 
   // Map pubs
   bool publish_map_{ false };
-  std::shared_ptr<MapLoader> data_point_marker_;  ///< Data point marker instance
+  std::shared_ptr<MapFileInterface> data_point_marker_;  ///< Data point marker instance
 
   // Laser scans
   bool publish_laser_scans_{ false };
-  std::shared_ptr<LaserScans> laser_scans_;
+  std::shared_ptr<LaserInterface> laser_scans_;
 
-  // Driver
-  std::shared_ptr<Driver> odom_driver_;
+  // DriverInterface
+  std::shared_ptr<DriverInterface> odom_driver_;
 
   // ARCL ROS interface
-  std::shared_ptr<Arcl_ROS> arcl_ros;
+  std::shared_ptr<ARCL_Interface> arcl_ros;
   int timeout_ms_{ 15000 };
 };

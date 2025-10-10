@@ -12,14 +12,14 @@
 /**
  * @brief Node for publishing LaserScan messages from string data.
  */
-class LaserScans
+class LaserInterface
 {
 public:
   /**
    * @brief Constructor. Initializes node pointer.
    * @param node Shared pointer to rclcpp::Node.
    */
-  LaserScans(rclcpp::Node::SharedPtr node)
+  LaserInterface(rclcpp::Node::SharedPtr node)
   {
     node_ = node;
   }

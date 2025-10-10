@@ -16,14 +16,14 @@
  * @brief ROS 2 ARCL driver node (without direct socket code).
  * Uses SocketDriver for ARCL communication.
  */
-class Driver
+class DriverInterface
 {
 public:
   /**
    * @brief Constructor. Initializes publishers, subscribers, and parameters.
    * @param node Shared pointer to rclcpp::Node.
    */
-  Driver(rclcpp::Node::SharedPtr node, std::shared_ptr<SocketDriver> driver)
+  DriverInterface(rclcpp::Node::SharedPtr node, std::shared_ptr<SocketDriver> driver)
   {
     node_ = node;
     socket_driver_ = driver;
@@ -47,13 +47,13 @@ public:
     base_frame_ = node_->declare_parameter<std::string>("driver.base_frame", "base_link");
 
     expected_cmd_vel_freq_ = node_->declare_parameter<double>("driver.expected_cmd_vel_freq", 20.0);
-    min_ang_speed_ = node_->declare_parameter<int>("driver.min_angular_speed", -30);   // deg/s
-    max_ang_speed_ = node_->declare_parameter<int>("driver.max_angular_speed", 30);    // deg/s
-    min_lin_speed_ = node_->declare_parameter<int>("driver.min_linear_speed", -1000);  // mm/s
-    max_lin_speed_ = node_->declare_parameter<int>("driver.max_linear_speed", 1000);   // mm/s
-    timeout_ms = node_->declare_parameter<int>("driver.command_timeout_ms", 15000);
+    min_ang_speed_ = node_->declare_parameter<double>("driver.min_angular_speed", -30);   // deg/s
+    max_ang_speed_ = node_->declare_parameter<double>("driver.max_angular_speed", 30);    // deg/s
+    min_lin_speed_ = node_->declare_parameter<double>("driver.min_linear_speed", -1000);  // mm/s
+    max_lin_speed_ = node_->declare_parameter<double>("driver.max_linear_speed", 1000);   // mm/s
 
-    expected_cmd_vel_interval_ = int(1000 / expected_cmd_vel_freq_);
+    unit_move_distance_ = node_->declare_parameter<double>("driver.unit_move_distance", 100.0);  // mm
+    unit_turn_angle_ = node_->declare_parameter<double>("driver.unit_turn_angle", 10.0);         // deg
 
     // Publishers
     if (publish_odom_)
@@ -61,21 +61,21 @@ public:
 
     // Subscribers
     stop_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
-        "amr/stop", 10, std::bind(&Driver::stopCB, this, std::placeholders::_1));
+        "amr/stop", 10, std::bind(&DriverInterface::stopCB, this, std::placeholders::_1));
     odom_reset_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
-        "amr/odomReset", 10, std::bind(&Driver::odomResetCB, this, std::placeholders::_1));
+        "amr/odomReset", 10, std::bind(&DriverInterface::odomResetCB, this, std::placeholders::_1));
 
     if (subscribe_cmd_vel_)
       cmd_vel_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
-          "amr/cmd_vel", 10, std::bind(&Driver::cmdVelCB, this, std::placeholders::_1));
+          "amr/cmd_vel", 10, std::bind(&DriverInterface::cmdVelCB, this, std::placeholders::_1));
 
     if (subscribe_goal_pose_)
       goal_pose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
-          goal_pose_topic_, 10, std::bind(&Driver::goalPoseCB, this, std::placeholders::_1));
+          goal_pose_topic_, 10, std::bind(&DriverInterface::goalPoseCB, this, std::placeholders::_1));
 
     if (subsrcibe_initial_pose_)
       initial_pose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
-          initial_pose_topic_, 10, std::bind(&Driver::initialPoseCB, this, std::placeholders::_1));
+          initial_pose_topic_, 10, std::bind(&DriverInterface::initialPoseCB, this, std::placeholders::_1));
   }
 
   /**
@@ -188,13 +188,9 @@ private:
 
   void cmdVelCB(const geometry_msgs::msg::Twist& msg)
   {
-    RCLCPP_INFO(node_->get_logger(), "Received cmd_vel: linear.x=%.2f angular.z=%.2f", msg.linear.x, msg.angular.z);
-
     // Convert into mm/s and deg/s for ARCL commands since twist is in m/s and rad/s
-    int lin = int(msg.linear.x * 1000);                // m/s to mm/s
-    int ang = int(msg.angular.z * (180.0 / 3.14159));  // rad/s to deg/s
-
-    RCLCPP_INFO(node_->get_logger(), "Converted cmd_vel: linear=%d mm/s angular=%d deg/s", lin, ang);
+    double lin = msg.linear.x * 1000;                // m/s to mm/s
+    double ang = msg.angular.z * (180.0 / 3.14159);  // rad/s to deg/s
 
     // Clamp values to min/max
     lin = std::clamp(lin, min_lin_speed_, max_lin_speed_);
@@ -206,36 +202,32 @@ private:
     if (std::abs(ang) < 5)
       ang = 0;
 
-    if (lin == 0 && ang == 0)
+    // If angular velocity is non-zero, send turn command first
+    if (std::abs(ang) > 0)
     {
-      stopCB(std_msgs::msg::Empty());
-      return;
-    }
-    else if (std::abs(ang) > 0)
-    {
-      // int target = (ang > 0) ? 1440 : -1440;
-      int target = (ang * expected_cmd_vel_interval_) / 1000.0;  // (deg/s * ms)/1000 -> deg
+      int angle = (ang > 0) ? unit_turn_angle_ : -unit_turn_angle_;
       int speed = std::abs(ang);
 
-      std::string cmd = "doTask deltaheading " + std::to_string(target) + " " + std::to_string(speed);
+      std::string cmd = "doTask deltaheading " + std::to_string(angle) + " " + std::to_string(speed);
 
-      RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
-
-      socket_driver_->send_command(cmd, true);
-      return;
+      int idx_ = socket_driver_->queue_command(cmd, "Completed doing task deltaHeading");
+      bool got = socket_driver_->wait_for_response(idx_, response_, timeout_ms);
+      if (!got)
+        RCLCPP_ERROR(node_->get_logger(), "Robot did not respond to angular cmd_vel command: %s", response_.c_str());
     }
-    else if (std::abs(lin) > 0)
+
+    // IF linear velocity is non-zero, send move command
+    if (std::abs(lin) > 0)
     {
-      // int target = (lin > 0) ? 10000 : -10000;
-      int target = (lin * expected_cmd_vel_interval_) / 1000.0;  // (mm/s * ms)/1000 -> mm
+      int distance = (lin > 0) ? unit_move_distance_ : -unit_move_distance_;
       int speed = std::abs(lin);
 
-      std::string cmd = "doTask move " + std::to_string(target) + " " + std::to_string(speed);
+      std::string cmd = "doTask move " + std::to_string(distance) + " " + std::to_string(speed);
 
-      RCLCPP_INFO(node_->get_logger(), "Sending command: %s", cmd.c_str());
-
-      socket_driver_->send_command(cmd, true);
-      return;
+      int idx_ = socket_driver_->queue_command(cmd, "Completed doing task move");
+      bool got = socket_driver_->wait_for_response(idx_, response_, timeout_ms);
+      if (!got)
+        RCLCPP_ERROR(node_->get_logger(), "Robot did not respond to linear cmd_vel command: %s", response_.c_str());
     }
   }
 
@@ -311,12 +303,21 @@ private:
   std::string base_frame_{ "base_link" };
   int timeout_ms{ 15000 };
 
-  int expected_cmd_vel_freq_{ 20 };       // Hz
-  int expected_cmd_vel_interval_{ 100 };  // ms
-  int min_lin_speed_{ -1000 };            // mm/s
-  int max_lin_speed_{ 1000 };             // mm/s
-  int min_ang_speed_{ -30 };              // deg/s
-  int max_ang_speed_{ 30 };               // deg/s
+  int expected_cmd_vel_freq_{ 20 };  // Hz
+  double min_lin_speed_{ -1000 };    // mm/s
+  double max_lin_speed_{ 1000 };     // mm/s
+  double min_ang_speed_{ -30 };      // deg/s
+  double max_ang_speed_{ 30 };       // deg/s
+
+  int unit_move_distance_{ 50 };  // mm
+  int unit_turn_angle_{ 5 };      // deg
+
+  std::string response_;
+  std::mutex cmd_mutex_;
+
+  int avg_lin_speed_{ 0 };
+  int avg_ang_speed_{ 0 };
+  int iterations_{ 0 };
 
   // Subscribers
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr stop_sub_;
