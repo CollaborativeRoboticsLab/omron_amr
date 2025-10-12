@@ -5,12 +5,14 @@
 #include <vector>
 #include <chrono>
 #include "rclcpp/rclcpp.hpp"
+#include <tf2_ros/transform_broadcaster.h>
 #include "std_msgs/msg/empty.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/twist.hpp"
-#include "amr_core/socket/socket_driver.hpp"
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include "amr_core/socket/socket_driver.hpp"
 
 /**
  * @brief ROS 2 ARCL driver node (without direct socket code).
@@ -27,8 +29,12 @@ public:
   {
     node_ = node;
     socket_driver_ = driver;
-  }
 
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
+  }
+  /**
+   * @brief Initializes parameters, publishers, and subscribers.
+   */
   void initialize()
   {
     // Parameters
@@ -120,7 +126,6 @@ public:
         continue;
       }
 
-      // Try to parse the next tokens as numbers
       if (previous_token == "Odometer:")
       {
         distance = std::stod(token);
@@ -139,19 +144,16 @@ public:
     }
 
     // Fill odometry message
-    // Distance in mm, heading in deg
     odom_msg.pose.pose.position.x = distance / 1000.0;  // meters
     odom_msg.pose.pose.position.y = 0.0;
     odom_msg.pose.pose.position.z = 0.0;
 
-    // Convert heading to quaternion (heading is in degrees)
     double heading_rad = heading * M_PI / 180.0;
     odom_msg.pose.pose.orientation.x = 0.0;
     odom_msg.pose.pose.orientation.y = 0.0;
     odom_msg.pose.pose.orientation.z = sin(heading_rad / 2.0);
     odom_msg.pose.pose.orientation.w = cos(heading_rad / 2.0);
 
-    // Optionally fill velocity if time > 0
     if (time > 0.0)
     {
       odom_msg.twist.twist.linear.x = (distance / 1000.0) / time;  // m/s
@@ -163,8 +165,21 @@ public:
       odom_msg.twist.twist.angular.z = 0.0;
     }
 
+    // Publish odometry
     if (publish_odom_ && odom_pub_)
       odom_pub_->publish(odom_msg);
+
+    // Broadcast odom -> base_link TF
+    geometry_msgs::msg::TransformStamped tf_msg;
+    tf_msg.header.stamp = odom_msg.header.stamp;
+    tf_msg.header.frame_id = odom_frame_;
+    tf_msg.child_frame_id = base_frame_;
+    tf_msg.transform.translation.x = odom_msg.pose.pose.position.x;
+    tf_msg.transform.translation.y = odom_msg.pose.pose.position.y;
+    tf_msg.transform.translation.z = odom_msg.pose.pose.position.z;
+    tf_msg.transform.rotation = odom_msg.pose.pose.orientation;
+
+    tf_broadcaster_->sendTransform(tf_msg);
   }
 
 private:
@@ -328,4 +343,5 @@ private:
 
   // Publishers
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };

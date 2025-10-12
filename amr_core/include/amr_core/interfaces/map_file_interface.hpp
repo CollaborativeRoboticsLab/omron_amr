@@ -16,7 +16,8 @@
 #include <limits>
 
 /**
- * @brief Publishes map grid and forbidden areas as MarkerArray for RViz visualization.
+ * @brief Publishes map grid created by the robot and forbidden areas as MarkerArray for RViz 
+ * visualization.
  */
 class MapFileInterface
 {
@@ -43,7 +44,7 @@ public:
     map_pub = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(map_topic_, 10);
     fa_pub = node_->create_publisher<visualization_msgs::msg::MarkerArray>("forbidden_areas", 10);
     timer = node_->create_wall_timer(std::chrono::milliseconds(map_pub_interval_ms_),
-                                      std::bind(&MapFileInterface::publish_map, this));
+                                     std::bind(&MapFileInterface::publish_map, this));
 
     set_forbidden_area_params();
 
@@ -59,7 +60,6 @@ public:
 
     RCLCPP_INFO(node_->get_logger(), "MapFileInterface initialized");
   }
-
 
   /**
    * @brief This function publishes the occupancy grid and forbidden areas to their respective topics.
@@ -582,7 +582,7 @@ private:
 
   rclcpp::Node::SharedPtr node_;  ///< Node pointer
   std::string map_file_;          ///< Map file name
-  std::string map_topic_;          ///< Map Topic
+  std::string map_topic_;         ///< Map Topic
 
   int map_pub_frequency_{ 2 };
   int map_pub_interval_ms_{ 500 };

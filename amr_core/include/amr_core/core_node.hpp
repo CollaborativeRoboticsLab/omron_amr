@@ -191,8 +191,8 @@ private:
   }
 
   /**
-   * @brief This function publishes the robot's status information to the status topic. This include parsing the
-   * following fields from the listener:
+   * @brief This function publishes the robot's status information to the status topic. As an example.
+   * This include parsing the following fields from the listener:
    *
    * ExtendedStatusForHumans: Robot lost
    * Status: Teleop driving
