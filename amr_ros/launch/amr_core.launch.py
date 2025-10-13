@@ -33,20 +33,11 @@ def generate_launch_description():
         output='log',
         parameters=[robot_desc],
     )
-        
-    # map_node = Node(
-    #     package='tf2_ros',
-    #     executable='static_transform_publisher',
-    #     name='world_publisher',
-    #     output='log',
-    #     arguments=['0.0', '0.0', '0.0', '0.0', '0.0', '0.0', 'map', 'pose']
-    # )
 
     ld = LaunchDescription()
 
     ld.add_action(core)
     ld.add_action(robot_state_publisher)
-    # ld.add_action(map_node)
-
+    
     return ld
 
