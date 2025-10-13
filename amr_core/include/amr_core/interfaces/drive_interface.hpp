@@ -68,6 +68,7 @@ public:
     // Subscribers
     stop_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
         "amr/stop", 10, std::bind(&DriverInterface::stopCB, this, std::placeholders::_1));
+    
     odom_reset_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
         "amr/odomReset", 10, std::bind(&DriverInterface::odomResetCB, this, std::placeholders::_1));
 

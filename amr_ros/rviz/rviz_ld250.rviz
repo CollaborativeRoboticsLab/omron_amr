@@ -26,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: PointCloud
 Visualization Manager:
   Class: ""
   Displays:
@@ -67,6 +67,10 @@ Visualization Manager:
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
         base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        laser_frame:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -154,14 +158,14 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
+        Max Value: 0.19499999284744263
+        Min Value: 0.19499999284744263
         Value: true
       Axis: Z
       Channel Name: intensity
       Class: rviz_default_plugins/PointCloud
       Color: 255; 255; 255
-      Color Transformer: ""
+      Color Transformer: AxisColor
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
@@ -170,10 +174,10 @@ Visualization Manager:
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: PointCloud
-      Position Transformer: ""
+      Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.05000000074505806
+      Size (m): 0.029999999329447746
       Style: Flat Squares
       Topic:
         Depth: 5
@@ -231,7 +235,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 10.665159225463867
+      Distance: 13.309398651123047
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -246,10 +250,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5703982710838318
+      Pitch: 0.520397961139679
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 0.45539844036102295
+      Yaw: 0.025399111211299896
     Saved: ~
 Window Geometry:
   Displays:

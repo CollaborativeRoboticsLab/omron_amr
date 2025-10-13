@@ -57,7 +57,7 @@ Run the following command to visualize robot. Swap `ld250` with `ld90` or `amr_p
 
 ```sh
 source install/setup.bash
-ros2 launch amr_ros ld250_visualize.launch.py
+ros2 launch amr_ros ld250_rviz.launch.py
 ```
 
 ### Start Teleoperation

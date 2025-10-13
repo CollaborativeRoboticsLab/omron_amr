@@ -103,7 +103,6 @@ public:
 
       status_pub_ = this->create_publisher<amr_msgs::msg::Status>("amr/source/status", 10);
       laser_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/laser", 10);
-      goals_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/all_goals", 10);
       odom_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/odom", 10);
       app_fault_query_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/application_fault_query", 10);
       faults_get_pub_ = this->create_publisher<std_msgs::msg::String>("amr/source/faults_get", 10);
@@ -183,7 +182,6 @@ private:
 
     pub_status();
     pub_laser();
-    pub_goals();
     pub_odometer();
     pub_app_fault_query();
     pub_faults_get();
@@ -225,6 +223,10 @@ private:
       double x = 0.0, y = 0.0, th = 0.0;
       if (iss >> x >> y >> th)
       {
+        laser_x_ = x;
+        laser_y_ = y;
+        laser_th_ = th;
+
         loc_msg.x = x;
         loc_msg.y = y;
         loc_msg.theta = th;
@@ -260,29 +262,7 @@ private:
         laser_pub_->publish(msg);
 
       if (publish_laser_scans_)
-        laser_scans_->update(msg);
-    }
-    catch (const std::out_of_range&)
-    {
-    }
-  }
-
-  void pub_goals()
-  {
-    try
-    {
-      const auto& goals = listener_->get_response("Goal");
-      std::string joined;
-      for (size_t i = 0; i < goals.size(); ++i)
-      {
-        if (i)
-          joined += ' ';
-        joined += goals[i];
-      }
-      std_msgs::msg::String msg;
-      msg.data = joined;
-      if (publish_source_ && goals_pub_)
-        goals_pub_->publish(msg);
+        laser_scans_->update(msg, laser_x_, laser_y_, laser_th_);
     }
     catch (const std::out_of_range&)
     {
@@ -318,7 +298,7 @@ private:
   {
     try
     {
-      const auto& query = listener_->get_response("ApplicationFaultQuery");
+      const auto& query = listener_->get_response("applicationFaultQuery");
       std::string joined;
       for (size_t i = 0; i < query.size(); ++i)
       {
@@ -391,6 +371,8 @@ private:
   std::string host_ip_;
   int host_port_{ 0 };
 
+  double laser_x_{ 0.0 }, laser_y_{ 0.0 }, laser_th_{ 0.0 };
+
   bool publish_source_{ false };
 
   bool enable_arcl_access_{ false };
@@ -408,7 +390,6 @@ private:
   // Source Pubs
   rclcpp::Publisher<amr_msgs::msg::Status>::SharedPtr status_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr laser_pub_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr goals_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr odom_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr app_fault_query_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr faults_get_pub_;

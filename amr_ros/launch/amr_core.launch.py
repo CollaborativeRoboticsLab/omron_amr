@@ -15,9 +15,7 @@ def load_file(package_name, file_path):
 
 def generate_launch_description():
     core_parms = os.path.join(get_package_share_directory('amr_ros'), 'config', 'parameters.yaml')
-
-    robot_description_config = load_file('amr_description', 'urdf/LD250.urdf')
-    robot_description = {'robot_description' : robot_description_config}
+    robot_desc = {'robot_description' : load_file('amr_description', 'urdf/LD250.urdf')}
 
     core = Node(
         package='amr_core',
@@ -33,7 +31,7 @@ def generate_launch_description():
         executable='robot_state_publisher',
         name='robot_state_publisher',
         output='log',
-        parameters=[robot_description],
+        parameters=[robot_desc],
     )
         
     # map_node = Node(

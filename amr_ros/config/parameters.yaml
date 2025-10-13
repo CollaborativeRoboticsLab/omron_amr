@@ -14,7 +14,7 @@ amr_core:
       frequency: 5
 
     map_data:
-      publish: true
+      publish: false
       topic: "map_grid"
       frequency: 2
       file: "data.map"
@@ -23,14 +23,10 @@ amr_core:
       publish: true
       topic: "scan"
       frame_id: "laser_frame"
-      angle_min: -1.5708
-      angle_max: 1.5708
-      angle_increment: 0.0069
-      time_increment: 0.0
-      scan_time: 0.1
-      range_min: 0.05
-      range_max: 30.0
-      use_intensity: false
+
+    arcl:
+      enable: false
+      timeout_ms: 15000
 
     driver:
       publish_odom: true
@@ -52,7 +48,3 @@ amr_core:
       max_angular_speed: 30.0     # deg/s
       unit_move_distance: 50.0   # mm
       unit_turn_angle: 5.0       # deg
-
-    arcl:
-      enable: false
-      timeout_ms: 15000
