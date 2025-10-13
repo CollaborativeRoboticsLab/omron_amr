@@ -1,0 +1,50 @@
+amr_core:
+  ros__parameters:
+    robot:
+      ip: "192.168.1.1"
+      port: 7171
+      password: "omron"
+
+    host:
+      ip: "192.168.1.50"
+      port: 7179
+
+    source_data:
+      publish: true
+      frequency: 5
+
+    map_data:
+      publish: false
+      topic: "map_grid"
+      frequency: 2
+      file: "data.map"
+
+    laser_scans:
+      publish: true
+      topic: "scan"
+      frame_id: "laser_frame"
+
+    arcl:
+      enable: false
+      timeout_ms: 15000
+
+    driver:
+      publish_odom: true
+      subscribe_cmd_vel: true
+      subscribe_goal_pose: true
+      subscribe_initial_pose: true
+      odom_topic: "/amr/odom"
+      cmd_vel_topic: "/amr/cmd_vel"
+      odom_reset_topic: "/amr/odomReset"
+      goal_pose_topic: "goal_pose"
+      initial_pose_topic: "initialpose"
+      odom_frame: "odom"
+      base_frame: "base_link"
+      expected_cmd_vel_freq: 20.0
+      command_timeout_ms: 15000
+      min_linear_speed: -1000.0  # mm/s
+      max_linear_speed: 1000.0   # mm/s
+      min_angular_speed: -30.0    # deg/s
+      max_angular_speed: 30.0     # deg/s
+      unit_move_distance: 50.0   # mm
+      unit_turn_angle: 5.0       # deg

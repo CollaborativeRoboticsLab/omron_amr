@@ -18,7 +18,7 @@ cd omron_ws/src
 
 Install dependencies
 ```sh
-sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-toolbox
+sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-toolbox ros-humble-teleop-twist-joy ros-humble-joy
 ```
 
 Clone the repositories into the `src` folder by
@@ -38,20 +38,10 @@ colcon build
 
 ### Initialization
 
-1. [Establish Remote connection to TM Robot](https://github.com/CollaborativeRoboticsLab/tmr_ros2?tab=readme-ov-file#-remote-connection-to-tm-robot)
+1. [Establish Remote connection to AMR Robot](https://github.com/CollaborativeRoboticsLab/omron_base/blob/main/docs/DeveloperGuide.adoc#231-set-up-user-ethernet)
 
-3. Once the robot starts up, it needs to have the listner node loaded (via TMFlow) and should be in the auto mode. On the arm it needs to flash blue and red, while on the pendent a blue light should appear near letter A.
+2. [Configure AMR robot via Mobile Planner](https://github.com/CollaborativeRoboticsLab/omron_base/blob/main/docs/DeveloperGuide_updated.adoc#332-set-up-arcl)
 
-4. If it is in manual mode (arm blinking green and pendent has a yellow light near letter M), press `M/A` button few seconds until the yellow button near M letter starts blinking and quickly enter the password (+-++-) on the pendent using pendent `+` and `-` keys.
-
-### Start with visualization
-
-Run the following command to visualize robot. Swap `ld250` with `ld90` or `amr_platform` for other robot models.
-
-```sh
-source install/setup.bash
-ros2 launch amr_ros amr_visualize.launch.py
-```
 
 ### Connect with the robot base
 
@@ -59,49 +49,28 @@ Run the following command to connect to the robot.
 
 ```sh
 source install/setup.bash
-ros2 launch amr_ros amr_connect.launch.py
+ros2 launch amr_ros amr_core.launch.py
 ```
+### Start visualization
 
-### TM Robot Arm with Moveit 
+Run the following command to visualize robot. Swap `ld250` with `ld90` or `amr_platform` for other robot models.
 
-TM driver node is included in the tm12x_run_move_group.launch.py file. Replace the `<robot_ip_address>` with actual ip address.
 ```sh
 source install/setup.bash
-ros2 launch tm12x_moveit_config tm12x_run_move_group.launch.py robot_ip:=<robot_ip_address>
+ros2 launch amr_ros ld250_rviz.launch.py
 ```
 
-### TM Robot Arm with Moveit (Simulation)
+### Start Teleoperation
 
-TM driver node is included in the tm12x_run_move_group.launch.py file.
 ```sh
 source install/setup.bash
-ros2 launch tm12x_moveit_config tm12x_run_move_group.launch.py
+ros2 launch amr_teleop amr_joyop.launch.py
 ```
-
-### Companion Computer Configuration : TM Robot Arm with Moveit
-
-1. TM driver node is included in the tm12x_run_move_group.launch.py file. To start the headless moveit server, uncomment the following line on the companion computer
-
-    ```yaml
-    command:
-    - ros2 launch tm12x_moveit_config tm12x_run_move_group_headless.launch.py robot_ip:=<robot_ip_address>
-    ```
-
-    and run
-
-    ```sh
-    docker compose up
-    ```
-
-2. On the remote computer run the following command,
-    ```sh
-    source install/setup.bash
-    ros2 launch tm12x_moveit_config tm12x_run_move_group_visualize.launch.py
-    ```
 
 ## To Do List
 
-- [ ] Replace AMR_Core with a cpp package with support for standard ros2 interface (/cmd_vel, /tf and /odom)
+- [x] Replace AMR_Core with a cpp package with support for standard ros2 interface (/cmd_vel, /tf and /odom)
+- [ ] Extend the interface with standard ros2 messages for battery and other optional data
 - [ ] Add support for NAV2
 - [ ] Create cascadeing launch files for AMR core and RVIz
 
