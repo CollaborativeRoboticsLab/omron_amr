@@ -47,7 +47,7 @@
     </joint>
 
     <!-- Laser frame -->
-    <link name="${prefix}laser_frame"/>
+    <link name="${prefix}laser_frame">
     </link>
 
     <!-- Base to laser frame fixed joint (matches LD250.urdf) -->
