@@ -71,6 +71,6 @@ ros2 launch amr_teleop amr_joyop.launch.py
 
 - [x] Replace AMR_Core with a cpp package with support for standard ros2 interface (/cmd_vel, /tf and /odom)
 - [ ] Extend the interface with standard ros2 messages for battery and other optional data
-- [ ] Add support for NAV2
-- [ ] Create cascadeing launch files for AMR core and RVIz
+- [x] Add support for NAV2
+- [x] Create cascadeing launch files for AMR core and RVIz
 
