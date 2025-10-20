@@ -30,9 +30,10 @@ amr_core:
 
     driver:
       publish_odom: true
-      subscribe_cmd_vel: true
+      subscribe_cmd_vel: false
       subscribe_goal_pose: true
       subscribe_initial_pose: true
+      subscribe_localplan: true
       odom_topic: "/amr/odom"
       cmd_vel_topic: "/amr/cmd_vel"
       odom_reset_topic: "/amr/odomReset"

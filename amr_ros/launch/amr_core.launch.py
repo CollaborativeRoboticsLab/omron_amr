@@ -40,12 +40,13 @@ def generate_launch_description():
         condition=UnlessCondition(robot_description_override)
     )
 
+    core_params = os.path.join(get_package_share_directory('amr_ros'), 'config', 'parameters.yaml')
     core = Node(
         package='amr_core',
         executable='amr_core',
         name='amr_core',
         output='screen',
-        parameters=[],
+        parameters=[core_params],
     )
 
     return LaunchDescription([
