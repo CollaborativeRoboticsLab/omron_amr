@@ -270,7 +270,7 @@ private:
     if (deg > 180)
       deg -= 360;
 
-    std::string cmd = "doTask setHeading " + std::to_string(deg) + " " + std::to_string(deg);
+    std::string cmd = "doTask setHeading " + std::to_string(deg) + " " + std::to_string(std::abs(deg));
     std::string identifier = { "Completed doing task setHeading" };
 
     RCLCPP_INFO(node_->get_logger(), "Sending local plan heading command: %s", cmd.c_str());
