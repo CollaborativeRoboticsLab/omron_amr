@@ -43,7 +43,7 @@ public:
     subscribe_cmd_vel_ = node_->declare_parameter<bool>("driver.subscribe_cmd_vel", true);
     subscribe_goal_pose_ = node_->declare_parameter<bool>("driver.subscribe_goal_pose", true);
     subscribe_initial_pose_ = node_->declare_parameter<bool>("driver.subscribe_initial_pose", true);
-    subscribe_local_plan_ = node_->declare_parameter<bool>("driver.use_localplan_instead_cmd_vel", false);
+    subscribe_local_plan_ = node_->declare_parameter<bool>("driver.", false);
 
     odom_topic_ = node_->declare_parameter<std::string>("driver.odom_topic", "amr/odom");
     cmd_vel_topic_ = node_->declare_parameter<std::string>("driver.cmd_vel_topic", "amr/cmd_vel");
