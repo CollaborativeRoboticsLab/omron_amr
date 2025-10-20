@@ -43,7 +43,7 @@ public:
     subscribe_cmd_vel_ = node_->declare_parameter<bool>("driver.subscribe_cmd_vel", true);
     subscribe_goal_pose_ = node_->declare_parameter<bool>("driver.subscribe_goal_pose", true);
     subscribe_initial_pose_ = node_->declare_parameter<bool>("driver.subscribe_initial_pose", true);
-    subscribe_local_plan_ = node_->declare_parameter<bool>("driver.", false);
+    subscribe_local_plan_ = node_->declare_parameter<bool>("driver.subscribe_localplan", false);
 
     odom_topic_ = node_->declare_parameter<std::string>("driver.odom_topic", "amr/odom");
     cmd_vel_topic_ = node_->declare_parameter<std::string>("driver.cmd_vel_topic", "amr/cmd_vel");
@@ -273,11 +273,15 @@ private:
     std::string cmd = "doTask setHeading " + std::to_string(deg) + " " + std::to_string(deg);
     std::string identifier = { "Completed doing task setHeading" };
 
+    RCLCPP_INFO(node_->get_logger(), "Sending local plan heading command: %s", cmd.c_str());
+
     int req_id = socket_driver_->queue_command(cmd, identifier);
     bool got = socket_driver_->wait_for_response(req_id, response_, timeout_ms);
 
     if (!got)
-			RCLCPP_ERROR(node_->get_logger(), "Robot did not respond to local plan command: %s", response_.c_str());	
+			RCLCPP_ERROR(node_->get_logger(), "Robot did not respond to local plan command: %s", response_.c_str());
+    else
+      RCLCPP_INFO(node_->get_logger(), "Local plan command response: %s", response_.c_str());
   }
 
   // Pose-based commands (from subscriptions)
