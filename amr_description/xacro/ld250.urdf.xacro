@@ -72,6 +72,7 @@
       Dimensions (from LD250.urdf comments):
       - length: 950 mm
       - width: 696 mm
+      - base height: 340 mm
       - laser glass offset front: 20 mm
       - laser glass offset back: 120 mm
       - laser glass bottom height: 180 mm
