@@ -5,7 +5,7 @@
     Updated to match LD250.urdf:
     - Adds laser_frame link
     - Adds base_link_to_laser_frame fixed joint at xyz="0.45 0 0.195"
-    - Keeps main_body mesh, inertial, and fixed joints
+    - Keeps amr_base mesh, inertial, and fixed joints
   -->
 
   <xacro:macro name="ld250" params="prefix:='' parent:='' xyz:='0 0 0' rpy:='0 0 0' mesh_pkg:='amr_description'">
@@ -19,13 +19,15 @@
     </link>
 
     <!-- Main body with mesh -->
-    <link name="${prefix}main_body">
+    <link name="${prefix}amr_base">
       <visual>
         <origin rpy="0 0 3.141582654" xyz="0 0 0"/>
         <geometry>
           <mesh filename="package://${mesh_pkg}/meshes/LD250.obj"/>
         </geometry>
-        <material name="${prefix}white"/>
+        <material name="grey">
+          <color rgba="0.5 0.5 0.5 1.0"/>
+        </material>
       </visual>
       <collision>
         <origin rpy="0 0 3.141592654" xyz="0 0 0"/>
@@ -39,10 +41,10 @@
       </inertial>
     </link>
 
-    <!-- Base to main body fixed joint -->
-    <joint name="${prefix}main_body_to_base" type="fixed">
+    <!-- Base link to main body fixed joint -->
+    <joint name="${prefix}amr_base_to_base_link" type="fixed">
       <parent link="${prefix}base_link"/>
-      <child link="${prefix}main_body"/>
+      <child link="${prefix}amr_base"/>
       <origin xyz="0 0 0"/>
     </joint>
 
