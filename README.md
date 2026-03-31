@@ -7,11 +7,11 @@ This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com
 View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide_updated.adoc).
 View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide.adoc).
 
-| Branch | ROS2 Version |
-|--------|--------------|
-| main | Jazzy |
-| develop | Jazzy |
-| humble | Humble |
+| Branch | ROS2 Version | Compile |
+|--------|--------------|---------|
+| main | Jazzy | [![main](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml/badge.svg?branch=main)](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml?query=branch%3Amain) |
+| develop | Jazzy | [![develop](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml/badge.svg?branch=develop)](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml?query=branch%3Adevelop) |
+| humble | Humble | [![humble](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml/badge.svg?branch=humble)](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml?query=branch%3Ahumble) |
 
 ## Setup
 
