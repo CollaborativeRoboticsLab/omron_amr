@@ -1,0 +1,49 @@
+name: Compile Check
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - humble
+
+  pull_request:
+    branches:
+      - humble
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up ROS 2 Humble
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
+
+      - name: Install system tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep
+
+      - name: Initialize rosdep
+        run: |
+          sudo rosdep init || true
+          rosdep update
+
+      - name: Install package dependencies
+        run: |
+          rosdep install --from-paths . --ignore-src --rosdistro humble -r -y
+
+      - name: Build workspace
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --event-handlers console_direct+
