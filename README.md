@@ -7,6 +7,12 @@ This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com
 View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide_updated.adoc).
 View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide.adoc).
 
+| Branch | ROS2 Version |
+|--------|--------------|
+| main | Jazzy |
+| develop | Jazzy |
+| humble | Humble |
+
 ## Setup
 
 Create a workspace
