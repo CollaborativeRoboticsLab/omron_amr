@@ -20,6 +20,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 include_directories(
@@ -38,6 +39,7 @@ ament_target_dependencies(${PROJECT_NAME}
   control_msgs
   visualization_msgs
   amr_msgs
+  ament_index_cpp
 
 )
 
