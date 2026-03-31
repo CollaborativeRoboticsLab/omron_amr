@@ -44,7 +44,10 @@ jobs:
             --from-paths . \
             --ignore-src \
             --rosdistro humble \
-            --dependency-types buildtool buildtool_export build build_export \
+            --dependency-types buildtool \
+            --dependency-types buildtool_export \
+            --dependency-types build \
+            --dependency-types build_export \
             -r -y
 
       - name: Build workspace
