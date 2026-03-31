@@ -1,11 +1,17 @@
-# Omron Base package
+# Omron AMR package
 
 To view the original Readme.md [click here](./docs/original_readme.md)
 
 This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com/OmronAPAC/Omron_AMR_ROS2)
 
-View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_base/blob/master/docs/DeveloperGuide_updated.adoc).
-View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_base/blob/master/docs/DeveloperGuide.adoc).
+View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide_updated.adoc).
+View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide.adoc).
+
+| Branch | ROS2 Version | Compile |
+|--------|--------------|---------|
+| main | Jazzy | [![main](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml/badge.svg?branch=main)](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml?query=branch%3Amain) |
+| develop | Jazzy | [![develop](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml/badge.svg?branch=develop)](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml?query=branch%3Adevelop) |
+| humble | Humble | [![humble](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml/badge.svg?branch=humble)](https://github.com/CollaborativeRoboticsLab/omron_amr/actions/workflows/compile.yml?query=branch%3Ahumble) |
 
 ## Setup
 
@@ -24,7 +30,7 @@ sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-
 Clone the repositories into the `src` folder by
 
 ```sh
-git clone https://github.com/CollaborativeRoboticsLab/omron_base.git
+git clone https://github.com/CollaborativeRoboticsLab/omron_amr.git
 ```
 
 Build by
@@ -38,9 +44,9 @@ colcon build
 
 ### Initialization
 
-1. [Establish Remote connection to AMR Robot](https://github.com/CollaborativeRoboticsLab/omron_base/blob/main/docs/DeveloperGuide.adoc#231-set-up-user-ethernet)
+1. [Establish Remote connection to AMR Robot](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/main/docs/DeveloperGuide.adoc#231-set-up-user-ethernet)
 
-2. [Configure AMR robot via Mobile Planner](https://github.com/CollaborativeRoboticsLab/omron_base/blob/main/docs/DeveloperGuide_updated.adoc#332-set-up-arcl)
+2. [Configure AMR robot via Mobile Planner](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/main/docs/DeveloperGuide_updated.adoc#332-set-up-arcl)
 
 
 ### Connect with the robot base
