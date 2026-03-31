@@ -40,7 +40,12 @@ jobs:
 
       - name: Install package dependencies
         run: |
-          rosdep install --from-paths . --ignore-src --rosdistro humble -r -y
+          rosdep install \
+            --from-paths . \
+            --ignore-src \
+            --rosdistro humble \
+            --dependency-types buildtool buildtool_export build build_export \
+            -r -y
 
       - name: Build workspace
         shell: bash
