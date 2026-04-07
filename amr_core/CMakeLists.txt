@@ -22,12 +22,16 @@ find_package(control_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(libaria CONFIG REQUIRED)
+
+set(AMR_CORE_ARIA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../libaria")
 
 include_directories(
   include
 )
 
 add_executable(${PROJECT_NAME} src/core_node.cpp)
+target_compile_definitions(${PROJECT_NAME} PRIVATE AMR_CORE_ARIA_DIR="${AMR_CORE_ARIA_DIR}")
 ament_target_dependencies(${PROJECT_NAME} 
   rclcpp
   rclcpp_action
@@ -42,19 +46,12 @@ ament_target_dependencies(${PROJECT_NAME}
   ament_index_cpp
 
 )
-
-add_executable(client src/client_node.cpp)
-ament_target_dependencies(client
-  rclcpp
-  rclcpp_action
-  std_msgs
-  amr_msgs
-  geometry_msgs
+target_link_libraries(${PROJECT_NAME}
+  libaria::ArNetworking
 )
 
 install(TARGETS
   ${PROJECT_NAME}
-  client
   DESTINATION lib/${PROJECT_NAME}
 )
 

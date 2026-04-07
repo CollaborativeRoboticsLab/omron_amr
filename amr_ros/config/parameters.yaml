@@ -2,12 +2,10 @@ amr_core:
   ros__parameters:
     robot:
       ip: "192.168.1.1"
-      port: 7171
-      password: "omron"
-
-    host:
-      ip: "192.168.1.50"
-      port: 7179
+      port: 7272
+      user: "admin"
+      password: "admin"
+      protocol: "6MTX"
 
     source_data:
       publish: true
@@ -34,11 +32,11 @@ amr_core:
       subscribe_goal_pose: true
       subscribe_initial_pose: true
       subscribe_localplan: false
-      odom_topic: "/amr/odom"
-      cmd_vel_topic: "/amr/cmd_vel"
-      odom_reset_topic: "/amr/odomReset"
-      goal_pose_topic: "goal_pose"
-      initial_pose_topic: "initialpose"
+      odom_topic: "/odom"
+      cmd_vel_topic: "/cmd_vel"
+      odom_reset_topic: "/odomReset"
+      goal_pose_topic: "/goal_pose"
+      initial_pose_topic: "/initialpose"
       odom_frame: "odom"
       base_frame: "base_link"
       expected_cmd_vel_freq: 20.0
