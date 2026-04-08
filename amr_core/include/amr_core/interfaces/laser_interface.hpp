@@ -38,16 +38,25 @@ public:
   }
 
   /**
-   * @brief Initializes the LaserScan publisher, subscriptions, and parameters.
+   * @brief Initializes parameters, publishers, and subscribers.
+   *
    * This should be called after the node is fully constructed.
+   * @param host Robot server IP address.
+   * @param port Robot server port.
+   * @param user Username for robot server authentication.
+   * @param password Password for robot server authentication.
+   * @param protocol Optional protocol version to enforce on the robot server connection.
+   *
+   * Throws std::runtime_error if connection to the robot server fails or is rejected by the robot.
    */
-  void initialize()
+  void initialize(const std::string& host, int port, const std::string& user, const std::string& password,
+                  const std::string& protocol)
   {
-    host_ = getOrDeclareParameter<std::string>("robot.ip", "127.0.0.1");
-    port_ = getOrDeclareParameter<int>("robot.port", 7272);
-    user_ = getOrDeclareParameter<std::string>("robot.user", "admin");
-    password_ = getOrDeclareParameter<std::string>("robot.password", "");
-    protocol_ = getOrDeclareParameter<std::string>("robot.protocol", "6MTX");
+    host_ = host;
+    port_ = port;
+    user_ = user;
+    password_ = password;
+    protocol_ = protocol;
 
     frame_id_ = getOrDeclareParameter<std::string>("laser_scans.frame_id", "laser_frame");
     topic_name_ = getOrDeclareParameter<std::string>("laser_scans.topic", "scan");

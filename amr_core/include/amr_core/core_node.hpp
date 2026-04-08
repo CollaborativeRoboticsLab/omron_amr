@@ -20,52 +20,45 @@ public:
    */
   void initialize()
   {
-    publish_source_ = this->declare_parameter<bool>("source_data.publish", false);
-    if (publish_source_)
+    host_ = getOrDeclareParameter<std::string>("robot.ip", "127.0.0.1");
+    port_ = getOrDeclareParameter<int>("robot.port", 7272);
+    user_ = getOrDeclareParameter<std::string>("robot.user", "admin");
+    password_ = getOrDeclareParameter<std::string>("robot.password", "");
+    protocol_ = getOrDeclareParameter<std::string>("robot.protocol", "6MTX");
+
+    try
     {
-      try
-      {
-        status_interface_ = std::make_shared<StatusInterface>(this->shared_from_this());
-        status_interface_->initialize();
-        RCLCPP_INFO(this->get_logger(), "Publishing status information enabled");
-      }
-      catch (const std::exception &ex)
-      {
-        status_interface_.reset();
-        RCLCPP_ERROR(this->get_logger(), "StatusInterface initialization failed: %s", ex.what());
-      }
+      status_interface_ = std::make_shared<StatusInterface>(this->shared_from_this());
+      status_interface_->initialize(host_, port_, user_, password_, protocol_);
+      RCLCPP_INFO(this->get_logger(), "Publishing status information enabled");
     }
-    else
+    catch (const std::exception& ex)
     {
-      RCLCPP_INFO(this->get_logger(), "Publishing status information is disabled");
+      status_interface_.reset();
+      RCLCPP_ERROR(this->get_logger(), "StatusInterface initialization failed: %s", ex.what());
     }
 
-    // Publish laser scans
-    publish_laser_scans_ = this->declare_parameter<bool>("laser_scans.publish", true);
-    if (publish_laser_scans_)
+    try
     {
-      try
-      {
-        laser_scans_ = std::make_shared<LaserInterface>(this->shared_from_this());
-        laser_scans_->initialize();
-        RCLCPP_INFO(this->get_logger(), "Publishing laser scans enabled");
-      }
-      catch (const std::exception &ex)
-      {
-        laser_scans_.reset();
-        RCLCPP_ERROR(this->get_logger(), "LaserInterface initialization failed: %s", ex.what());
-      }
+      laser_scans_ = std::make_shared<LaserInterface>(this->shared_from_this());
+      laser_scans_->initialize(host_, port_, user_, password_, protocol_);
+      RCLCPP_INFO(this->get_logger(), "Publishing laser scans enabled");
+    }
+    catch (const std::exception& ex)
+    {
+      laser_scans_.reset();
+      RCLCPP_ERROR(this->get_logger(), "LaserInterface initialization failed: %s", ex.what());
     }
 
     // DriverInterface
     try
     {
-      odom_driver_ = std::make_shared<DriverInterface>(this->shared_from_this());
-      odom_driver_->initialize();
+      driver_ = std::make_shared<DriverInterface>(this->shared_from_this());
+      driver_->initialize(host_, port_, user_, password_, protocol_);
     }
-    catch (const std::exception &ex)
+    catch (const std::exception& ex)
     {
-      odom_driver_.reset();
+      driver_.reset();
       RCLCPP_ERROR(this->get_logger(), "DriverInterface initialization failed: %s", ex.what());
     }
 
@@ -73,13 +66,40 @@ public:
   }
 
 private:
-  bool publish_source_{ false };
+  /**
+   * @brief Helper function to get a parameter value or declare it with a default if it doesn't exist.
+   * @tparam T Parameter type.
+   * @param name Parameter name.
+   * @param default_value Default value to declare if parameter doesn't exist.
+   * @return Parameter value.
+   */
+  template <typename T>
+  T getOrDeclareParameter(const std::string& name, const T& default_value)
+  {
+    if (!this->has_parameter(name))
+    {
+      return this->declare_parameter<T>(name, default_value);
+    }
+
+    T value = default_value;
+    this->get_parameter(name, value);
+    return value;
+  }
+
+private:
+  // Status information
   std::shared_ptr<StatusInterface> status_interface_;
 
   // Laser scans
-  bool publish_laser_scans_{ false };
   std::shared_ptr<LaserInterface> laser_scans_;
 
   // DriverInterface
-  std::shared_ptr<DriverInterface> odom_driver_;
+  std::shared_ptr<DriverInterface> driver_;
+
+  // Parameters
+  std::string host_;
+  int port_{ 7272 };
+  std::string user_;
+  std::string password_;
+  std::string protocol_;
 };

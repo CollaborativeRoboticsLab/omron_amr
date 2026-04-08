@@ -46,17 +46,28 @@ public:
 
   /**
    * @brief Initializes parameters, publishers, and subscribers.
+   *
+   * This should be called after the node is fully constructed.
+   * @param host Robot server IP address.
+   * @param port Robot server port.
+   * @param user Username for robot server authentication.
+   * @param password Password for robot server authentication.
+   * @param protocol Optional protocol version to enforce on the robot server connection.
+   *
+   * Throws std::runtime_error if connection to the robot server fails or is rejected by the robot.
    */
-  void initialize()
+  void initialize(const std::string& host, int port, const std::string& user, const std::string& password,
+                  const std::string& protocol)
   {
-    host_ = getOrDeclareParameter<std::string>("robot.ip", "127.0.0.1");
-    port_ = getOrDeclareParameter<int>("robot.port", 7272);
-    user_ = getOrDeclareParameter<std::string>("robot.user", "admin");
-    password_ = getOrDeclareParameter<std::string>("robot.password", "");
-    protocol_ = getOrDeclareParameter<std::string>("robot.protocol", "6MTX");
+    host_ = host;
+    port_ = port;
+    user_ = user;
+    password_ = password;
+    protocol_ = protocol;
 
     odom_topic_ = getOrDeclareParameter<std::string>("driver.odom_topic", "amr/odom");
     cmd_vel_topic_ = getOrDeclareParameter<std::string>("driver.cmd_vel_topic", "amr/cmd_vel");
+    stop_topic_ = getOrDeclareParameter<std::string>("driver.stop_topic", "amr/stop");
 
     odom_frame_ = getOrDeclareParameter<std::string>("driver.odom_frame", "amr/odom");
     base_frame_ = getOrDeclareParameter<std::string>("driver.base_frame", "amr/base_link");
@@ -74,7 +85,7 @@ public:
 
     // Subscribers
     stop_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
-        "amr/stop", 10, std::bind(&DriverInterface::stopCB, this, std::placeholders::_1));
+        stop_topic_, 10, std::bind(&DriverInterface::stopCB, this, std::placeholders::_1));
 
     cmd_vel_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
         cmd_vel_topic_, 10, std::bind(&DriverInterface::cmdVelCB, this, std::placeholders::_1));
@@ -84,8 +95,6 @@ public:
     ratio_drive_.setThrottle(drive_throttle_pct_);
     configureDriveMode();
     client_.runAsync();
-
-    odomReset();
 
     const int watchdog_ms = std::max(50, static_cast<int>(1000.0 / std::max(expected_cmd_vel_freq_, 1.0)));
     cmd_vel_watchdog_timer_ = node_->create_wall_timer(std::chrono::milliseconds(watchdog_ms),
@@ -182,6 +191,15 @@ private:
    */
   void handleUpdateNumbers(ArNetPacket* packet)
   {
+    // The packet structure is assumed to be:
+    // byte: update type (ignored)
+    // byte4: x in mm
+    // byte4: y in mm
+    // byte2: theta in degrees
+    // byte2: x velocity in mm/s
+    // byte2: theta velocity in deg/s
+    // byte2: y velocity in mm/s
+
     packet->bufToByte2();
     const double x = static_cast<double>(packet->bufToByte4()) / 1000.0;
     const double y = static_cast<double>(packet->bufToByte4()) / 1000.0;
@@ -191,6 +209,7 @@ private:
     const double y_vel_mps = static_cast<double>(packet->bufToByte2()) / 1000.0;
     packet->bufToByte();
 
+    // Update internal pose state within a mutex to ensure thread safety with the ROS callbacks that may access the pose.
     {
       std::lock_guard<std::mutex> lock(pose_mutex_);
       pose_x_ = x;
@@ -199,37 +218,66 @@ private:
       have_pose_ = true;
     }
 
-    if (!publish_odom_ || !odom_pub_)
+    // Capture the first pose as the odom origin. Subsequent updates are transformed into that initial frame,
+    // so the published odom is a proper relative pose even when the robot starts with a non-zero heading.
+    if (!initial_pose_set_)
     {
+      initial_pose_x_ = pose_x_;
+      initial_pose_y_ = pose_y_;
+      initial_pose_theta_deg_ = pose_theta_deg_;
+      initial_pose_set_ = true;
       return;
     }
+
+    const double initial_theta_rad = initial_pose_theta_deg_ * M_PI / 180.0;
+    const double delta_x = pose_x_ - initial_pose_x_;
+    const double delta_y = pose_y_ - initial_pose_y_;
+    const double cos_initial = std::cos(initial_theta_rad);
+    const double sin_initial = std::sin(initial_theta_rad);
+
+    const double relative_x = cos_initial * delta_x + sin_initial * delta_y;
+    const double relative_y = -sin_initial * delta_x + cos_initial * delta_y;
+    const double relative_theta_rad = std::atan2(std::sin((pose_theta_deg_ - initial_pose_theta_deg_) * M_PI / 180.0),
+                                                 std::cos((pose_theta_deg_ - initial_pose_theta_deg_) * M_PI / 180.0));
+    const double relative_x_vel_mps = cos_initial * x_vel_mps + sin_initial * y_vel_mps;
+    const double relative_y_vel_mps = -sin_initial * x_vel_mps + cos_initial * y_vel_mps;
+
+    theta_rad_ = relative_theta_rad;
 
     nav_msgs::msg::Odometry odom_msg;
     odom_msg.header.stamp = node_->now();
     odom_msg.header.frame_id = odom_frame_;
     odom_msg.child_frame_id = base_frame_;
-    odom_msg.pose.pose.position.x = x;
-    odom_msg.pose.pose.position.y = y;
+    odom_msg.pose.pose.position.x = relative_x;
+    odom_msg.pose.pose.position.y = relative_y;
     odom_msg.pose.pose.position.z = 0.0;
 
-    const double theta_rad = theta_deg * M_PI / 180.0;
-    odom_msg.pose.pose.orientation.z = std::sin(theta_rad / 2.0);
-    odom_msg.pose.pose.orientation.w = std::cos(theta_rad / 2.0);
-    odom_msg.twist.twist.linear.x = x_vel_mps;
-    odom_msg.twist.twist.linear.y = y_vel_mps;
+    odom_msg.pose.pose.orientation.z = std::sin(theta_rad_ / 2.0);
+    odom_msg.pose.pose.orientation.w = std::cos(theta_rad_ / 2.0);
+
+    odom_msg.twist.twist.linear.x = relative_x_vel_mps;
+    odom_msg.twist.twist.linear.y = relative_y_vel_mps;
     odom_msg.twist.twist.angular.z = theta_vel_rad_s;
+
     odom_pub_->publish(odom_msg);
 
     geometry_msgs::msg::TransformStamped tf_msg;
     tf_msg.header = odom_msg.header;
     tf_msg.child_frame_id = base_frame_;
-    tf_msg.transform.translation.x = x;
-    tf_msg.transform.translation.y = y;
+
+    tf_msg.transform.translation.x = relative_x;
+    tf_msg.transform.translation.y = relative_y;
     tf_msg.transform.translation.z = 0.0;
+
     tf_msg.transform.rotation = odom_msg.pose.pose.orientation;
+
     tf_broadcaster_->sendTransform(tf_msg);
   }
 
+  /**
+   * @brief Callback for stop messages. Stops the robot immediately.
+   * @param msg The received stop message (empty).
+   */
   void stopCB(const std_msgs::msg::Empty& /*msg*/)
   {
     cmd_vel_active_ = false;
@@ -241,24 +289,12 @@ private:
     }
   }
 
-  void odomReset()
-  {
-    static const std::vector<std::string> reset_requests = { "ResetTripOdometer", "TripReset" };
-    for (const auto& request : reset_requests)
-    {
-      if (!client_.dataExists(request.c_str()))
-      {
-        continue;
-      }
-
-      client_.requestOnce(request.c_str());
-      RCLCPP_INFO(node_->get_logger(), "Requested odometry reset using %s", request.c_str());
-      return;
-    }
-
-    RCLCPP_WARN(node_->get_logger(), "Server does not advertise a known odometry reset request");
-  }
-
+  /**
+   * @brief Callback for cmd_vel messages. Converts Twist messages to drive commands and sends them to the robot.
+   * Also updates the last command time for the watchdog.
+   * 
+   * @param msg The received cmd_vel message.
+   */
   void cmdVelCB(const geometry_msgs::msg::Twist& msg)
   {
     last_cmd_vel_time_ = node_->now();
@@ -305,6 +341,14 @@ private:
     }
   }
 
+
+private:
+  /**
+   * @brief Helper function to convert a velocity value to a percentage of the maximum, clamped to [-100, 100].
+   * @param value The velocity value to convert.
+   * @param max_abs_value The maximum absolute velocity corresponding to 100%.
+   * @return The velocity as a percentage of the maximum, clamped to [-100, 100].
+   */
   static double toPercent(double value, double max_abs_value)
   {
     if (max_abs_value <= 0.0)
@@ -316,11 +360,17 @@ private:
     return std::clamp(percent, -100.0, 100.0);
   }
 
-private:
+  // ROS node and libaria client
   rclcpp::Node::SharedPtr node_;
+
+  // Libaria runtime manager to ensure proper initialization and shutdown of libaria
   amr_core::LibAriaRuntime aria_runtime_;
+
+  // Libaria client and drive interface
   ArClientBase client_;
   ArClientRatioDrive ratio_drive_;
+
+  //
   ArFunctor1C<DriverInterface, ArNetPacket*> update_callback_;
 
   // Parameters
@@ -329,17 +379,10 @@ private:
   std::string user_;
   std::string password_;
   std::string protocol_;
-  bool publish_odom_{ true };
-  bool subscribe_cmd_vel_{ true };
-  bool subscribe_goal_pose_{ true };
-  bool subscribe_initial_pose_{ true };
-  bool subscribe_local_plan_{ false };
 
   std::string odom_topic_{ "amr/odom" };
   std::string cmd_vel_topic_{ "amr/cmd_vel" };
-  std::string odom_reset_topic_{ "amr/odomReset" };
-  std::string goal_pose_topic_{ "goal_pose" };
-  std::string initial_pose_topic_{ "initialpose" };
+  std::string stop_topic_{ "amr/stop" };
 
   std::string odom_frame_{ "odom" };
   std::string base_frame_{ "base_link" };
@@ -354,12 +397,21 @@ private:
   bool unsafe_drive_{ true };
 
   std::mutex pose_mutex_;
+  
   double pose_x_{ 0.0 };
   double pose_y_{ 0.0 };
   double pose_theta_deg_{ 0.0 };
+
+  double initial_pose_x_{ 0.0 };
+  double initial_pose_y_{ 0.0 };
+  double initial_pose_theta_deg_{ 0.0 };
+  double theta_rad_{ 0.0 };
+
   bool have_pose_{ false };
   bool cmd_vel_active_{ false };
   bool stop_sent_{ false };
+  bool initial_pose_set_{ false };
+
   rclcpp::Time last_cmd_vel_time_{ 0, 0, RCL_ROS_TIME };
 
   // Subscribers
