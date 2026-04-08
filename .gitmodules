@@ -1,0 +1,3 @@
+[submodule "libaria"]
+	path = libaria
+	url = https://github.com/CollaborativeRoboticsLab/libaria.git
