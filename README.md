@@ -30,7 +30,7 @@ sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-
 Clone the repositories into the `src` folder by
 
 ```sh
-git clone https://github.com/CollaborativeRoboticsLab/omron_amr.git
+git clone  --recurse-submodules https://github.com/CollaborativeRoboticsLab/omron_amr.git
 ```
 
 Build by
@@ -42,28 +42,39 @@ colcon build
 
 ## Usage 
 
-### Initialization
+### Start the robot base LD90
 
-1. [Establish Remote connection to AMR Robot](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/main/docs/DeveloperGuide.adoc#231-set-up-user-ethernet)
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld90.launch.py
+```
 
-2. [Configure AMR robot via Mobile Planner](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/main/docs/DeveloperGuide_updated.adoc#332-set-up-arcl)
+to start with the rviz visualization, run
 
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld90.launch.py rviz:=true
+```
 
-### Connect with the robot base
+### Start the robot base LD250
 
-Run the following command to connect to the robot.
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld250.launch.py
+```
+
+to start with the rviz visualization, run
+
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld250.launch.py rviz:=true
+```
+
+### Start only the hardware interface for any robot base
 
 ```sh
 source install/setup.bash
 ros2 launch amr_ros amr_core.launch.py
-```
-### Start visualization
-
-Run the following command to visualize robot. Swap `ld250` with `ld90` or `amr_platform` for other robot models.
-
-```sh
-source install/setup.bash
-ros2 launch amr_ros ld250_rviz.launch.py
 ```
 
 ### Start Teleoperation
@@ -72,11 +83,4 @@ ros2 launch amr_ros ld250_rviz.launch.py
 source install/setup.bash
 ros2 launch amr_teleop amr_joyop.launch.py
 ```
-
-## To Do List
-
-- [x] Replace AMR_Core with a cpp package with support for standard ros2 interface (/cmd_vel, /tf and /odom)
-- [ ] Extend the interface with standard ros2 messages for battery and other optional data
-- [x] Add support for NAV2
-- [x] Create cascadeing launch files for AMR core and RVIz
 
