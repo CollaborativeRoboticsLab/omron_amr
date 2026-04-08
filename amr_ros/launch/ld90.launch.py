@@ -27,7 +27,7 @@ def generate_launch_description():
 	declare_robot_description_override = DeclareLaunchArgument(
 		'robot_description_override',
 		default_value='false',
-		description='URDF/Xacro file path inside the package'
+		description='Disable loading the ld90 robot description, a mother launch can override this to load a different robot description',
   	)
 
 	core_launch = IncludeLaunchDescription(
@@ -35,8 +35,7 @@ def generate_launch_description():
 			FindPackageShare('amr_ros'),
 			'launch',
 			'amr_core.launch.py',
-		])),
-		launch_arguments={'robot_description_override': robot_description_override}.items(),
+		]))
 	)
 
 	robot_state_publisher = Node(
