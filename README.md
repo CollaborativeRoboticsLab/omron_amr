@@ -2,7 +2,7 @@
 
 To view the original Readme.md [click here](./docs/original_readme.md)
 
-This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com/OmronAPAC/Omron_AMR_ROS2)
+This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com/OmronAPAC/Omron_AMR_ROS2) along with integration of [libaria](https://github.com/CollaborativeRoboticsLab/libaria) following [KalanaRatnayake/ros_omron_agv](https://github.com/KalanaRatnayake/ros_omron_agv)
 
 View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide_updated.adoc).
 View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/DeveloperGuide.adoc).
