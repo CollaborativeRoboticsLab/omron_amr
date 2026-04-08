@@ -56,7 +56,7 @@
     <joint name="${prefix}base_link_to_laser_frame" type="fixed">
       <parent link="${prefix}base_link"/>
       <child link="${prefix}laser_frame"/>
-      <origin xyz="0.45 0 0.195"/>
+      <origin xyz="0.40 0 0.190"/>
     </joint>
 
     <!-- Optional mounting to an external parent -->
@@ -69,14 +69,19 @@
     </xacro:if>
 
     <!--
-      Dimensions (from LD250.urdf comments):
-      - length: 950 mm
-      - width: 696 mm
-      - base height: 340 mm
-      - laser glass offset front: 20 mm
-      - laser glass offset back: 120 mm
-      - laser glass bottom height: 180 mm
-      - laser glass top height: 210 mm
+      Dimensions (from https://files.omron.eu/downloads/latest/datasheet/en/i828_ld-series_mobile_robot_datasheet_en.pdf?v=2):
+      - length: 970 mm
+      - width: 720 mm
+      - base height: 380 mm
+      - laser glass center height: 190 mm
+
+      Dimensions roughly measured
+      - laser glass offset front: 35 mm
+      - laser glass offset back: 135 mm
+
+      Calaculated from the above dimensions:
+      - laser center from the middle of the robot: (970/2 - 135 + (135-35)/2) mm = 400 mm
+
     -->
   </xacro:macro>
 </robot>
