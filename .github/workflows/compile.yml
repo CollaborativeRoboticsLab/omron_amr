@@ -20,10 +20,20 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      WS_DIR: ${{ github.workspace }}/ws
 
     steps:
-      - name: Check out repository
+      - name: Check out omron_amr
         uses: actions/checkout@v4
+        with:
+          path: ws/src/omron_amr
+
+      - name: Check out libaria
+        uses: actions/checkout@v4
+        with:
+          repository: CollaborativeRoboticsLab/libaria
+          path: ws/src/libaria
 
       - name: Set up ROS 2 Jazzy
         uses: ros-tooling/setup-ros@v0.7
@@ -42,10 +52,11 @@ jobs:
 
       - name: Install package dependencies
         run: |
-          rosdep install --from-paths . --ignore-src --rosdistro jazzy -r -y
+          rosdep install --from-paths "$WS_DIR/src" --ignore-src --rosdistro jazzy -r -y
 
       - name: Build workspace
         shell: bash
         run: |
           source /opt/ros/jazzy/setup.bash
+          cd "$WS_DIR"
           colcon build --event-handlers console_direct+
