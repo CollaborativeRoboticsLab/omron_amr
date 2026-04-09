@@ -59,6 +59,17 @@
       <origin xyz="0.40 0 0.190"/>
     </joint>
 
+    <!-- Laser frame -->
+    <link name="${prefix}laser_frame_low">
+    </link>
+
+    <!-- Base to laser frame fixed joint (matches LD250.urdf) -->
+    <joint name="${prefix}base_link_to_laser_frame_low" type="fixed">
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}laser_frame_low"/>
+      <origin xyz="0.40 0 0.060"/>
+    </joint>
+
     <!-- Optional mounting to an external parent -->
     <xacro:if value="${parent != ''}">
       <joint name="${prefix}base_mount" type="fixed">
@@ -78,6 +89,7 @@
       Dimensions roughly measured
       - laser glass offset front: 35 mm
       - laser glass offset back: 135 mm
+      - lower laser glass center height: 60 mm
 
       Calaculated from the above dimensions:
       - laser center from the middle of the robot: (970/2 - 135 + (135-35)/2) mm = 400 mm

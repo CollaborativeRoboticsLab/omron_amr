@@ -14,6 +14,7 @@ This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com
 
 - [Core startup](./docs/core_startup.md)
 - [Core parameters](./docs/core_parameters.md)
+- [Laser interface](./docs/laser_interface.md)
 - [Nav2 usage](./docs/nav2_usage.md)
 
 ## Setup
@@ -122,4 +123,9 @@ ros2 launch amr_nav2 nav2_rviz.launch.py
 ```sh
 source install/setup.bash
 ros2 launch amr_teleop amr_joyop.launch.py
+```
+ or 
+
+```sh
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```

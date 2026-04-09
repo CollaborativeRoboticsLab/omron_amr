@@ -22,12 +22,12 @@ The hardware interface is configured from `amr_ros/config/parameters.yaml`.
 
 ### Laser scan publishing
 
-- `laser_scans.topic`: scan topic, currently `scan`
-- `laser_scans.frame_id`: laser frame name
-- `laser_scans.request`: ARCL scan request name
-- `laser_scans.request_period_ms`: scan polling period
-- `laser_scans.angle_min`, `angle_max`, `angle_increment`: scan geometry
-- `laser_scans.range_min`, `range_max`: scan range limits
+- `laser.main_laser.*`: primary front safety laser configuration for `/scan`
+- `laser.low_laser.enabled`: enables the low front laser publisher
+- `laser.low_laser.*`: low front laser configuration for `/scan_low`
+- Each laser block exposes `topic`, `frame_id`, `request`, `request_period_ms`, `angle_min`, `angle_max`, `angle_increment`, `range_min`, and `range_max`
+
+The published `angle_increment` is derived from the configured angular span and the number of points received in each packet. The configured `angle_increment` acts as a fallback when the packet does not contain enough points to infer a step size.
 
 ### Driver interface
 

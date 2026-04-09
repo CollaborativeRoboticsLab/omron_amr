@@ -70,7 +70,10 @@ def generate_launch_description():
 			FindPackageShare('amr_ros'),
 			'launch',
 			'amr_core.launch.py',
-		]))
+		])),
+		launch_arguments={
+			'params_file': PathJoinSubstitution([FindPackageShare('amr_ros'), 'config', 'ld250_parameters.yaml']),
+		}.items(),
 	)
 
 	robot_state_publisher = Node(
