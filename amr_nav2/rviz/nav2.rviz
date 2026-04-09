@@ -2,14 +2,14 @@ Panels:
   - Class: nav2_rviz_plugins/Navigation2
     Name: Navigation 2
   - Class: rviz_common/Displays
-    Help Height: 78
+    Help Height: 74
     Name: Displays
     Property Tree Widget:
       Expanded:
         - /Global Options1
         - /Status1
       Splitter Ratio: 0.31028667092323303
-    Tree Height: 1104
+    Tree Height: 458
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -29,6 +29,12 @@ Panels:
     Name: Time
     SyncMode: 0
     SyncSource: LaserScan
+  - Class: nav2_rviz_plugins/Navigation 2
+    Name: Navigation 2
+  - Class: slam_toolbox::SlamToolboxPlugin
+    Name: SlamToolboxPlugin
+  - Class: nav2_rviz_plugins/Selector
+    Name: Selector
 Visualization Manager:
   Class: ""
   Displays:
@@ -354,6 +360,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /clicked_point
+    - Class: nav2_rviz_plugins/GoalTool
   Transformation:
     Current:
       Class: rviz_default_plugins/TF
@@ -361,25 +368,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 17.5379695892334
+      Distance: 16.655284881591797
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.7372870445251465
-        Y: -0.14722953736782074
-        Z: -0.37525540590286255
+        X: 1.0568912029266357
+        Y: -0.24874237179756165
+        Z: -0.9297974705696106
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5200005769729614
+      Pitch: 0.7600002288818359
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 0.020000115036964417
+      Yaw: 6.268192291259766
     Saved: ~
 Window Geometry:
   Displays:
@@ -389,8 +396,12 @@ Window Geometry:
   Hide Right Dock: false
   Navigation 2:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd00000002000000000000025300000525fc0200000004fb00000018004e0061007600690067006100740069006f006e00200032000000003b000000ca0000006e00fffffffb000000100044006900730070006c006100790073010000003b000004d9000000c700fffffffb0000001200530065006c0065006300740069006f006e000000020c000000dd0000005c00fffffffb0000000800540069006d0065010000051a000000460000003700ffffff000000010000010000000525fc0200000002fb0000000a00560069006500770073010000003b00000525000000a000fffffffb0000001e0054006f006f006c002000500072006f0070006500720074006900650073000000003b000005250000005c00ffffff000006a10000052500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000002000000000000025300000525fc0200000006fb00000018004e0061007600690067006100740069006f006e00200032000000003b000000ca0000006e00fffffffb000000100044006900730070006c006100790073010000003b0000024f000000c700fffffffc0000029000000269000001d10100001afa000000000100000002fb00000018004e0061007600690067006100740069006f006e002000320100000000000002530000012800fffffffb000000220053006c0061006d0054006f006f006c0062006f00780050006c007500670069006e0100000000ffffffff000001e700fffffffb0000001200530065006c0065006300740069006f006e000000020c000000dd0000005c00fffffffb0000000800540069006d006501000004ff000000610000003700fffffffb0000001000530065006c006500630074006f007200000004a6000000ba000000ba00ffffff000000010000010000000525fc0200000002fb0000000a00560069006500770073010000003b00000525000000a000fffffffb0000001e0054006f006f006c002000500072006f0070006500720074006900650073000000003b000005250000005c00ffffff000006a10000052500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
+    collapsed: false
+  Selector:
+    collapsed: false
+  SlamToolboxPlugin:
     collapsed: false
   Time:
     collapsed: false
