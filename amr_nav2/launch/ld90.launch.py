@@ -19,7 +19,6 @@ def generate_launch_description():
     # Get the launch directory
 
     package_dir = get_package_share_directory('amr_nav2')
-    nav2_bringup_dir = get_package_share_directory('nav2_bringup')
 
     # Create the launch configuration variables
     namespace       = LaunchConfiguration('namespace')
@@ -139,10 +138,8 @@ def generate_launch_description():
                               'params_file': params_file}.items()),
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(nav2_bringup_dir, 'launch', 'localization_launch.py')),
-            condition=IfCondition(PythonExpression([
-                "'", map_file_name, "' != '' and ", use_localization, ' and not ', use_slam])),
+            PythonLaunchDescriptionSource(os.path.join(package_dir, 'launch', 'localization.launch.py')),
+            condition=IfCondition(use_localization),
             launch_arguments={'namespace': namespace,
                               'map': map_yaml_file,
                               'use_sim_time': use_sim_time,
