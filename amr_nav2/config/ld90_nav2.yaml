@@ -38,6 +38,7 @@ amcl:
     z_short: 0.05
     scan_topic: scan
 
+
 map_saver:
   ros__parameters:
     save_map_timeout: 5.0
@@ -47,7 +48,7 @@ map_saver:
 
 bt_navigator:
   ros__parameters:
-      # enable_stamped_cmd_vel: true
+    # enable_stamped_cmd_vel: true
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
@@ -90,15 +91,15 @@ controller_server:
       time_steps: 56
       model_dt: 0.05
       batch_size: 2000
-      ax_max: 0.3
-      ax_min: -0.5
-      ay_max: 0.3
-      az_max: 0.35
+      ax_max: 3.0
+      ax_min: -3.0
+      ay_max: 3.0
+      az_max: 3.5
       vx_std: 0.2
       vy_std: 0.2
       wz_std: 0.4
-      vx_max: 1.0
-      vx_min: -0.1
+      vx_max: 0.5
+      vx_min: -0.35
       vy_max: 0.5
       wz_max: 1.9
       iteration_count: 1
@@ -179,17 +180,17 @@ local_costmap:
       global_frame: odom
       robot_base_frame: base_link
       rolling_window: true
-      width: 4
-      height: 4
+      width: 3
+      height: 3
       resolution: 0.05
-      footprint: "[[0.475, 0.348], 
-                   [0.475, -0.348], 
-                   [-0.475, -0.348], 
-                   [-0.475, 0.348]]"
+      footprint: "[[0.35, 0.25], 
+                   [0.35, -0.25], 
+                   [-0.35, -0.25], 
+                   [-0.35, 0.25]]"
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
+        cost_scaling_factor: 4.0
         inflation_radius: 0.75
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
@@ -206,7 +207,6 @@ local_costmap:
           max_obstacle_height: 2.0
           clearing: True
           marking: True
-          inf_is_valid: True
           data_type: "LaserScan"
           raytrace_max_range: 5.0
           raytrace_min_range: 0.0
@@ -220,15 +220,15 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      # enable_stamwped_cmd_vel: true
-      update_frequency: 2.0
-      publish_frequency: 2.0
+      # enable_stamped_cmd_vel: true
+      update_frequency: 1.0
+      publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
-      footprint: "[[0.475, 0.348], 
-                   [0.475, -0.348], 
-                   [-0.475, -0.348], 
-                   [-0.475, 0.348]]"
+      footprint: "[[0.35, 0.25], 
+                   [0.35, -0.25], 
+                   [-0.35, -0.25], 
+                   [-0.35, 0.25]]"
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
@@ -241,7 +241,6 @@ global_costmap:
           max_obstacle_height: 2.0
           clearing: True
           marking: True
-          inf_is_valid: True
           data_type: "LaserScan"
           raytrace_max_range: 5.0
           raytrace_min_range: 0.0
@@ -302,7 +301,7 @@ behavior_server:
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.0472
     min_rotational_vel: 0.4
-    rotational_acc_lim: 1.0472
+    rotational_acc_lim: 3.2
 
 waypoint_follower:
   ros__parameters:
@@ -322,16 +321,15 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [1.0, 0.0, 1.0472]         # [trans_x, trans_y, rot_z] (m/s, m/s, rad/s)
-    min_velocity: [-0.1, 0.0, -1.0472]       # [trans_x, trans_y, rot_z] (m/s, m/s, rad/s)
-    max_accel: [0.3, 0.0, 1.0472]            # [trans_x, trans_y, rot_z] (m/s^2, m/s^2, rad/s^2)
-    max_decel: [-0.5, 0.0, -1.0472]          # [trans_x, trans_y, rot_z] (m/s^2, m/s^2, rad/s^2)
+    max_velocity: [1.2, 0.0, 1.0472]
+    min_velocity: [-0.2, 0.0, -1.0472]
+    max_accel: [2.5, 0.0, 3.2]
+    max_decel: [-2.5, 0.0, -3.2]
     odom_topic: "/odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 1.0
 
-        
 collision_monitor:
   ros__parameters:
     # enable_stamped_cmd_vel: true
@@ -344,6 +342,8 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
+    # Polygons represent zone around the robot for "stop", "slowdown" and "limit" action types,
+    # and robot footprint for "approach" action type.
     polygons: ["FootprintApproach"]
     FootprintApproach:
       type: "polygon"
@@ -362,9 +362,10 @@ collision_monitor:
       max_height: 2.0
       enabled: True
 
+
 docking_server:
   ros__parameters:
-    # enable_stamped_cmd_vel: true
+    enable_stamped_cmd_vel: true
     controller_frequency: 50.0
     initial_perception_timeout: 5.0
     wait_charge_timeout: 5.0
@@ -382,8 +383,8 @@ docking_server:
       docking_threshold: 0.05
       staging_x_offset: -0.7
       use_external_detection_pose: true
-      use_battery_status: false
-      use_stall_detection: false
+      use_battery_status: false # true
+      use_stall_detection: false # true
       external_detection_timeout: 1.0
       external_detection_translation_x: -0.18
       external_detection_translation_y: 0.0
