@@ -8,7 +8,7 @@
     - Keeps main_body mesh, inertial, and fixed joints
   -->
 
-  <xacro:macro name="ld250" params="prefix:='' parent:='' xyz:='0 0 0' rpy:='0 0 0' mesh_pkg:='amr_description'">
+  <xacro:macro name="ld250" params="prefix:='' laser_frame_name:='laser_frame' parent:='' xyz:='0 0 0' rpy:='0 0 0' mesh_pkg:='amr_description'">
     <!-- Materials (prefixed to avoid name collisions when instantiating multiple robots) -->
     <material name="${prefix}blue"><color rgba="0 0 0.8 1"/></material>
     <material name="${prefix}black"><color rgba="0 0 0 1"/></material>
@@ -47,13 +47,13 @@
     </joint>
 
     <!-- Laser frame -->
-    <link name="${prefix}laser_frame">
+    <link name="${prefix}${laser_frame_name}">
     </link>
 
     <!-- Base to laser frame fixed joint (matches LD250.urdf) -->
     <joint name="${prefix}base_link_to_laser_frame" type="fixed">
       <parent link="${prefix}base_link"/>
-      <child link="${prefix}laser_frame"/>
+      <child link="${prefix}${laser_frame_name}"/>
       <origin xyz="0.45 0 0.195"/>
     </joint>
 
