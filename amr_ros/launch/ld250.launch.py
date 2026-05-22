@@ -16,6 +16,7 @@ def generate_launch_description():
 	use_localization = LaunchConfiguration('use_localization')
 	nav2_params_file = LaunchConfiguration('nav2_params_file')
 	map_yaml_file = LaunchConfiguration('map')
+	extra_params_file = LaunchConfiguration('extra_params_file')
 
 	xacro_file = PathJoinSubstitution([FindPackageShare('amr_description'), 'xacro', 'ld250_robot.urdf.xacro'])
 
@@ -59,6 +60,12 @@ def generate_launch_description():
 		description='Nav2 parameter file to pass to the LD250 navigation launch.',
 	)
 
+	declare_extra_params_file = DeclareLaunchArgument(
+		'extra_params_file',
+		default_value='',
+		description='Optional extra parameter file layered on top of the LD250 hardware parameters.',
+	)
+
 	declare_map = DeclareLaunchArgument(
 		'map',
 		default_value='',
@@ -73,6 +80,7 @@ def generate_launch_description():
 		])),
 		launch_arguments={
 			'params_file': PathJoinSubstitution([FindPackageShare('amr_ros'), 'config', 'ld250_parameters.yaml']),
+			'extra_params_file': extra_params_file,
 		}.items(),
 	)
 
@@ -117,6 +125,7 @@ def generate_launch_description():
 		declare_use_slam,
 		declare_use_localization,
 		declare_nav2_params_file,
+		declare_extra_params_file,
 		declare_map,
 		core_launch,
 		robot_state_publisher,

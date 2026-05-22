@@ -16,12 +16,14 @@ The hardware interface is configured from `amr_ros/config/parameters.yaml`.
 
 ### Status publishing
 
+- `status.publish`: enables the status interface and battery publisher
 - `status.topic`: robot status topic
 - `status.battery_topic`: battery state topic
 - `status.publish_period_ms`: status publish period in milliseconds
 
 ### Laser scan publishing
 
+- `laser.main_laser.enabled`: enables the primary front laser publisher
 - `laser.main_laser.*`: primary front safety laser configuration for `/scan`
 - `laser.low_laser.enabled`: enables the low front laser publisher
 - `laser.low_laser.*`: low front laser configuration for `/scan_low`
@@ -34,8 +36,11 @@ The published `angle_increment` is derived from the configured angular span and 
 - `driver.odom_topic`: odometry topic, currently `/odom`
 - `driver.cmd_vel_topic`: velocity command topic, currently `/cmd_vel`
 - `driver.stop_topic`: stop topic
+- `driver.publish_odom`: enables odometry publication from `amr_core`
+- `driver.publish_robot_tf`: enables TF publication from `amr_core`
 - `driver.odom_frame`: odom frame name
 - `driver.base_frame`: base frame name
+- `driver.expected_cmd_vel_freq`: expected command rate used by the cmd_vel watchdog timer
 - `driver.min_linear_speed`: minimum linear speed in mm/s
 - `driver.max_linear_speed`: maximum linear speed in mm/s
 - `driver.min_angular_speed`: minimum angular speed in deg/s
