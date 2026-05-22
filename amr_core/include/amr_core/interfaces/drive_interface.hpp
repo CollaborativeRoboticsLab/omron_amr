@@ -40,6 +40,7 @@ public:
   {
     // Parameters
     publish_odom_ = node_->declare_parameter<bool>("driver.publish_odom", true);
+    publish_robot_tf_ = node_->declare_parameter<bool>("driver.publish_robot_tf", true);
     subscribe_cmd_vel_ = node_->declare_parameter<bool>("driver.subscribe_cmd_vel", true);
     subscribe_goal_pose_ = node_->declare_parameter<bool>("driver.subscribe_goal_pose", true);
     subscribe_initial_pose_ = node_->declare_parameter<bool>("driver.subscribe_initial_pose", true);
@@ -53,6 +54,7 @@ public:
 
     odom_frame_ = node_->declare_parameter<std::string>("driver.odom_frame", "odom");
     base_frame_ = node_->declare_parameter<std::string>("driver.base_frame", "base_link");
+    timeout_ms = node_->declare_parameter<int>("driver.command_timeout_ms", 15000);
 
     expected_cmd_vel_freq_ = node_->declare_parameter<double>("driver.expected_cmd_vel_freq", 20.0);
     min_ang_speed_ = node_->declare_parameter<double>("driver.min_angular_speed", -30);   // deg/s
@@ -65,18 +67,18 @@ public:
 
     // Publishers
     if (publish_odom_)
-      odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>("amr/odom", 10);
+      odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
 
     // Subscribers
     stop_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
         "amr/stop", 10, std::bind(&DriverInterface::stopCB, this, std::placeholders::_1));
 
     odom_reset_sub_ = node_->create_subscription<std_msgs::msg::Empty>(
-        "amr/odomReset", 10, std::bind(&DriverInterface::odomResetCB, this, std::placeholders::_1));
+        odom_reset_topic, 10, std::bind(&DriverInterface::odomResetCB, this, std::placeholders::_1));
 
     if (subscribe_cmd_vel_ && !subscribe_local_plan_)
       cmd_vel_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
-          "amr/cmd_vel", 10, std::bind(&DriverInterface::cmdVelCB, this, std::placeholders::_1));
+          cmd_vel_topic_, 10, std::bind(&DriverInterface::cmdVelCB, this, std::placeholders::_1));
     else if (!subscribe_cmd_vel_ && subscribe_local_plan_)
       local_plan_sub_ = node_->create_subscription<nav_msgs::msg::Path>(
           "/local_plan", 10, std::bind(&DriverInterface::localPlanCB, this, std::placeholders::_1));
@@ -178,17 +180,19 @@ public:
     if (publish_odom_ && odom_pub_)
       odom_pub_->publish(odom_msg);
 
-    // Broadcast odom -> base_link TF
-    geometry_msgs::msg::TransformStamped tf_msg;
-    tf_msg.header.stamp = odom_msg.header.stamp;
-    tf_msg.header.frame_id = odom_frame_;
-    tf_msg.child_frame_id = base_frame_;
-    tf_msg.transform.translation.x = odom_msg.pose.pose.position.x;
-    tf_msg.transform.translation.y = odom_msg.pose.pose.position.y;
-    tf_msg.transform.translation.z = odom_msg.pose.pose.position.z;
-    tf_msg.transform.rotation = odom_msg.pose.pose.orientation;
+    if (publish_robot_tf_)
+    {
+      geometry_msgs::msg::TransformStamped tf_msg;
+      tf_msg.header.stamp = odom_msg.header.stamp;
+      tf_msg.header.frame_id = odom_frame_;
+      tf_msg.child_frame_id = base_frame_;
+      tf_msg.transform.translation.x = odom_msg.pose.pose.position.x;
+      tf_msg.transform.translation.y = odom_msg.pose.pose.position.y;
+      tf_msg.transform.translation.z = odom_msg.pose.pose.position.z;
+      tf_msg.transform.rotation = odom_msg.pose.pose.orientation;
 
-    tf_broadcaster_->sendTransform(tf_msg);
+      tf_broadcaster_->sendTransform(tf_msg);
+    }
   }
 
 private:
@@ -342,6 +346,7 @@ private:
 
   // Parameters
   bool publish_odom_{ true };
+  bool publish_robot_tf_{ true };
   bool subscribe_cmd_vel_{ true };
   bool subscribe_goal_pose_{ true };
   bool subscribe_initial_pose_{ true };

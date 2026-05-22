@@ -50,6 +50,7 @@ public:
     publish_source_ = this->declare_parameter<bool>("source_data.publish", false);
     publish_frequency_ = this->declare_parameter<int>("source_data.frequency", 5);
     pub_interval_ms_ = int(1000 / publish_frequency_);
+    reset_odometer_on_startup_ = this->declare_parameter<bool>("driver.reset_odometer_on_startup", true);
 
     // SocketDriver (low-level)
     RCLCPP_INFO(this->get_logger(), "Initializing SocketDriver..");
@@ -149,13 +150,19 @@ public:
       arcl_ros->initialize();
     }
 
-    // Reset odometer
-    RCLCPP_INFO(this->get_logger(), "Resetting odometer..");
-    std::string response;
-    int req_id = driver_->queue_command("odometerReset", "");
-    bool got_response = driver_->wait_for_response(req_id, response, timeout_ms_);
-    if (!got_response)
-      RCLCPP_INFO(this->get_logger(), "Reset result: %s", response.c_str());
+    if (reset_odometer_on_startup_)
+    {
+      RCLCPP_INFO(this->get_logger(), "Resetting odometer..");
+      std::string response;
+      int req_id = driver_->queue_command("odometerReset", "");
+      bool got_response = driver_->wait_for_response(req_id, response, timeout_ms_);
+      if (!got_response)
+        RCLCPP_INFO(this->get_logger(), "Reset result: %s", response.c_str());
+    }
+    else
+    {
+      RCLCPP_INFO(this->get_logger(), "Skipping odometer reset on startup");
+    }
 
     RCLCPP_INFO(this->get_logger(), "CoreNode initialized");
   }
@@ -374,6 +381,7 @@ private:
   double laser_x_{ 0.0 }, laser_y_{ 0.0 }, laser_th_{ 0.0 };
 
   bool publish_source_{ false };
+  bool reset_odometer_on_startup_{ true };
 
   bool enable_arcl_access_{ false };
 

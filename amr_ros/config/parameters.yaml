@@ -30,6 +30,7 @@ amr_core:
 
     driver:
       publish_odom: true
+      publish_robot_tf: true
       subscribe_cmd_vel: true
       subscribe_goal_pose: true
       subscribe_initial_pose: true
@@ -41,6 +42,7 @@ amr_core:
       initial_pose_topic: "initialpose"
       odom_frame: "odom"
       base_frame: "base_link"
+      reset_odometer_on_startup: true
       expected_cmd_vel_freq: 20.0
       command_timeout_ms: 15000
       min_linear_speed: -1000.0  # mm/s

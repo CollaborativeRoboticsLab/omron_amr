@@ -1,7 +1,7 @@
 import sys
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
 from launch_ros.actions import Node
 from launch.conditions import UnlessCondition
@@ -20,14 +20,9 @@ def load_file(package_name, file_path):
         return None
 
 
-def generate_launch_description():
+def _create_nodes(context):
     robot_description_override = LaunchConfiguration('robot_description_override')
-
-    declare_robot_description_override = DeclareLaunchArgument(
-        'robot_description_override',
-        default_value='false',
-        description='URDF/Xacro file path inside the package'
-    )
+    extra_params_file = LaunchConfiguration('extra_params_file').perform(context)
 
     robot_description = {'robot_description': load_file('amr_description', 'urdf/LD250.urdf')}
 
@@ -40,18 +35,37 @@ def generate_launch_description():
         condition=UnlessCondition(robot_description_override)
     )
 
-    core_params = os.path.join(get_package_share_directory('amr_ros'), 'config', 'parameters.yaml')
+    parameter_files = [os.path.join(get_package_share_directory('amr_ros'), 'config', 'parameters.yaml')]
+    if extra_params_file:
+        parameter_files.append(extra_params_file)
+
     core = Node(
         package='amr_core',
         executable='amr_core',
         name='amr_core',
         output='screen',
-        parameters=[core_params],
+        parameters=parameter_files,
+    )
+
+    return [robot_state_publisher, core]
+
+
+def generate_launch_description():
+    declare_robot_description_override = DeclareLaunchArgument(
+        'robot_description_override',
+        default_value='false',
+        description='URDF/Xacro file path inside the package'
+    )
+
+    declare_extra_params_file = DeclareLaunchArgument(
+        'extra_params_file',
+        default_value='',
+        description='Optional extra ROS parameter file layered on top of the default amr_ros parameters'
     )
 
     return LaunchDescription([
         declare_robot_description_override,
-        robot_state_publisher,
-        core,
+        declare_extra_params_file,
+        OpaqueFunction(function=_create_nodes),
     ])
 
