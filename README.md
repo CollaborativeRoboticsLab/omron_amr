@@ -29,7 +29,7 @@ sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-
 Clone the repositories into the `src` folder by
 
 ```sh
-git clone https://github.com/CollaborativeRoboticsLab/omron_amr.git
+git clone --recursive https://github.com/CollaborativeRoboticsLab/omron_amr.git
 ```
 
 Build by
