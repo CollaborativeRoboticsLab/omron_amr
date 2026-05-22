@@ -1,11 +1,11 @@
 # Omron AMR package
 
-To view the original Readme.md [click here](./docs/original_readme.md)
+To view the original Readme.md [click here](./docs/old/original_readme.md)
 
-This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com/OmronAPAC/Omron_AMR_ROS2)
+This package is a restructuring of [OmronAPAC/Omron_AMR_ROS2](https://github.com/OmronAPAC/Omron_AMR_ROS2) with a libaria-backed `amr_core` hardware interface.
 
-View [New Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/old/DeveloperGuide_updated.adoc).
-View [Old Developer's Guide](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/master/docs/old/DeveloperGuide.adoc).
+View [New Developer's Guide](./docs/old/DeveloperGuide_updated.adoc).
+View [Old Developer's Guide](./docs/old/DeveloperGuide.adoc).
 
 More information
 - [amr_core parameters](./docs/parameters.md)
@@ -39,26 +39,47 @@ cd ..
 colcon build
 ```
 
-## Usage 
+## Usage
 
 ### Initialization
 
-1. [Establish Remote connection to AMR Robot](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/main/docs/DeveloperGuide.adoc#231-set-up-user-ethernet)
+1. [Establish Remote connection to AMR Robot](./docs/old/DeveloperGuide.adoc)
 
-2. [Configure AMR robot via Mobile Planner](https://github.com/CollaborativeRoboticsLab/omron_amr/blob/main/docs/DeveloperGuide_updated.adoc#332-set-up-arcl)
+2. [Configure AMR robot via Mobile Planner](./docs/old/DeveloperGuide_updated.adoc)
 
-
-### Connect with the robot base
-
-Run the following command to connect to the robot.
+### Start only the hardware interface
 
 ```sh
 source install/setup.bash
 ros2 launch amr_ros amr_core.launch.py
 ```
-### Start visualization
 
-Run the following command to visualize robot. Swap `ld250` with `ld90` or `amr_platform` for other robot models.
+### Start the LD250 wrapper
+
+This launches the LD250 hardware parameters and can optionally include Nav2 and RViz.
+
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld250.launch.py
+```
+
+Example with Nav2 and RViz:
+
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld250.launch.py use_nav2:=true use_slam:=true rviz:=true
+```
+
+Digital twin overlay example:
+
+```sh
+source install/setup.bash
+ros2 launch amr_ros ld250.launch.py extra_params_file:=/absolute/path/to/override.yaml
+```
+
+### Start visualization only
+
+Run the following command to visualize the robot. Swap `ld250` with `ld90` or `amr_platform` for other robot models.
 
 ```sh
 source install/setup.bash
@@ -71,11 +92,4 @@ ros2 launch amr_ros ld250_rviz.launch.py
 source install/setup.bash
 ros2 launch amr_teleop amr_joyop.launch.py
 ```
-
-## To Do List
-
-- [x] Replace AMR_Core with a cpp package with support for standard ros2 interface (/cmd_vel, /tf and /odom)
-- [ ] Extend the interface with standard ros2 messages for battery and other optional data
-- [x] Add support for NAV2
-- [x] Create cascadeing launch files for AMR core and RVIz
 

@@ -1,43 +1,45 @@
 # Digital Twin Override Pattern
 
-For mixed real-hardware and simulation workflows, keep the generic AMR defaults in [../amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml) and layer package-specific overrides on top.
+For mixed real-hardware and simulation workflows, keep the generic AMR defaults in [../amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml) or [../amr_ros/config/ld250_parameters.yaml](../amr_ros/config/ld250_parameters.yaml) and layer package-specific overrides on top.
 
-## Why use an override file
+## Launch layering
 
-The base AMR package should preserve normal robot behavior:
+[../amr_ros/launch/amr_core.launch.py](../amr_ros/launch/amr_core.launch.py) accepts:
 
-- publishes odometry
-- publishes `odom -> base_link` TF
-- optionally publishes listener-derived laser and source topics
-- resets the odometer on startup
+- `params_file`: the base hardware parameter file
+- `extra_params_file`: an optional overlay file applied after `params_file`
 
-That is the right default for a standalone AMR integration, but it conflicts with a digital twin that already publishes the authoritative robot state.
+The LD250 wrapper [../amr_ros/launch/ld250.launch.py](../amr_ros/launch/ld250.launch.py) forwards the same `extra_params_file` argument.
 
-## Recommended pattern
+## Twin-safe controls
 
-1. Keep hardware defaults in [../amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml).
-2. Add a package-specific override file in the integration package.
-3. Pass that file into [../amr_ros/launch/amr_core.launch.py](../amr_ros/launch/amr_core.launch.py) with the `extra_params_file` launch argument.
+For a simulation-authoritative setup, the libaria-backed driver can remain command-capable while simulation owns robot state. The main controls are:
 
-## An example
+- `status.publish`
+- `laser.main_laser.enabled`
+- `laser.low_laser.enabled`
+- `driver.publish_odom`
+- `driver.publish_robot_tf`
 
-Omron Handsolo uses [handsolo_ros/config/handsolo-amr.yaml](https://github.com/CollaborativeRoboticsLab/omron_handsolo/tree/humble/handsolo_ros/config/handsolo-amr.yaml) to disable ROS-side state publication from `amr_core` while keeping the command path active.
+## Example override
 
-The relevant override values are:
+Omron Handsolo can layer an override file that looks like this:
 
 ```yaml
 amr_core:
   ros__parameters:
-    source_data:
+    status:
       publish: false
 
-    laser_scans:
-      publish: false
+    laser:
+      main_laser:
+        enabled: false
+      low_laser:
+        enabled: false
 
     driver:
       publish_odom: false
       publish_robot_tf: false
-      reset_odometer_on_startup: false
 ```
 
 With that arrangement:
@@ -46,4 +48,4 @@ With that arrangement:
 - simulation owns scan publication
 - `amr_core` still receives filtered velocity commands and forwards them to the AMR
 
-This keeps the authority over robot state in one place instead of splitting it across simulation and hardware interfaces.
+This keeps robot-state authority in one place instead of splitting it across simulation and hardware interfaces.

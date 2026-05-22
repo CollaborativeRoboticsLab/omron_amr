@@ -125,7 +125,7 @@ def generate_launch_description():
                               'params_file': params_file}.items()),
 
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(package_dir, 'launch', 'navigation.launch.py')),
+            PythonLaunchDescriptionSource(os.path.join(package_dir, 'launch', 'nav2.launch.py')),
             launch_arguments={'namespace': namespace,
                               'use_sim_time': use_sim_time,
                               'autostart': autostart,

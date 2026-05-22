@@ -1,12 +1,9 @@
-import sys
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch.conditions import UnlessCondition
-from launch_ros.parameter_descriptions import ParameterValue
-from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 
 def load_file(package_name, file_path):
@@ -21,6 +18,7 @@ def load_file(package_name, file_path):
 
 
 def _create_nodes(context):
+    params_file = LaunchConfiguration('params_file').perform(context)
     robot_description_override = LaunchConfiguration('robot_description_override')
     extra_params_file = LaunchConfiguration('extra_params_file').perform(context)
 
@@ -35,7 +33,7 @@ def _create_nodes(context):
         condition=UnlessCondition(robot_description_override)
     )
 
-    parameter_files = [os.path.join(get_package_share_directory('amr_ros'), 'config', 'parameters.yaml')]
+    parameter_files = [params_file]
     if extra_params_file:
         parameter_files.append(extra_params_file)
 
@@ -51,6 +49,14 @@ def _create_nodes(context):
 
 
 def generate_launch_description():
+    default_core_params = os.path.join(get_package_share_directory('amr_ros'), 'config', 'parameters.yaml')
+
+    declare_params_file = DeclareLaunchArgument(
+        'params_file',
+        default_value=default_core_params,
+        description='Base parameter file passed to amr_core.',
+    )
+
     declare_robot_description_override = DeclareLaunchArgument(
         'robot_description_override',
         default_value='false',
@@ -64,6 +70,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        declare_params_file,
         declare_robot_description_override,
         declare_extra_params_file,
         OpaqueFunction(function=_create_nodes),
