@@ -1,79 +1,84 @@
 # `amr_core` Parameters
 
-The default parameters for `amr_core` live in [amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml).
-Launch files can layer an additional parameter file on top of those defaults with the `extra_params_file` argument in [amr_ros/launch/amr_core.launch.py](../amr_ros/launch/amr_core.launch.py).
+The default hardware parameters live in [amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml).
+The LD250 wrapper launch uses [amr_ros/config/ld250_parameters.yaml](../amr_ros/config/ld250_parameters.yaml) as its base file.
 
-## Common groups
+[amr_ros/launch/amr_core.launch.py](../amr_ros/launch/amr_core.launch.py) accepts:
 
-### `robot.*`
+- `params_file`: the base parameter file passed to `amr_core`
+- `extra_params_file`: an optional overlay file applied after `params_file`
 
-- `robot.ip`: target AMR IP address.
-- `robot.port`: ARCL port used by the driver connection.
-- `robot.password`: ARCL password.
+## `robot.*`
 
-### `host.*`
+- `robot.ip`: target robot IP address.
+- `robot.port`: controller port used by the libaria client.
+- `robot.user`: login user for the robot controller.
+- `robot.password`: login password for the robot controller.
+- `robot.protocol`: robot protocol profile, for example `6MTX`.
 
-- `host.ip`: local host IP for the AMR listener socket.
-- `host.port`: local host port for the AMR listener socket.
+## `status.*`
 
-### `source_data.*`
+- `status.publish`: enables the status interface.
+- `status.topic`: topic for the published AMR status message.
+- `status.battery_topic`: topic for the battery state publisher.
+- `status.publish_period_ms`: status polling and publish period in milliseconds.
 
-- `source_data.publish`: publishes raw listener-derived status, odom, laser, and fault topics under `amr/source/*`.
-- `source_data.frequency`: polling and publish rate for listener-driven source data.
+## `laser.main_laser.*`
 
-### `map_data.*`
+- `laser.main_laser.enabled`: enables the primary front laser publisher.
+- `laser.main_laser.topic`: output topic, normally `/scan`.
+- `laser.main_laser.frame_id`: frame used in the published scan.
+- `laser.main_laser.request`: libaria request name used to subscribe to the laser packet.
+- `laser.main_laser.request_period_ms`: packet request period in milliseconds.
+- `laser.main_laser.angle_min`: minimum scan angle in radians.
+- `laser.main_laser.angle_max`: maximum scan angle in radians.
+- `laser.main_laser.angle_increment`: fallback angle increment in radians.
+- `laser.main_laser.range_min`: minimum valid range in meters.
+- `laser.main_laser.range_max`: maximum valid range in meters.
 
-- `map_data.publish`: enables map file publication.
-- `map_data.topic`: output topic for map data.
-- `map_data.frequency`: publication rate.
-- `map_data.file`: map file name.
+## `laser.low_laser.*`
 
-### `laser_scans.*`
+- `laser.low_laser.enabled`: enables the low front laser publisher.
+- `laser.low_laser.topic`: output topic, normally `/scan_low`.
+- `laser.low_laser.frame_id`: frame used in the published scan.
+- `laser.low_laser.request`: libaria request name used to subscribe to the laser packet.
+- `laser.low_laser.request_period_ms`: packet request period in milliseconds.
+- `laser.low_laser.angle_min`: minimum scan angle in radians.
+- `laser.low_laser.angle_max`: maximum scan angle in radians.
+- `laser.low_laser.angle_increment`: fallback angle increment in radians.
+- `laser.low_laser.range_min`: minimum valid range in meters.
+- `laser.low_laser.range_max`: maximum valid range in meters.
 
-- `laser_scans.publish`: enables ROS laser scan publication from AMR listener data.
-- `laser_scans.topic`: laser scan topic name.
-- `laser_scans.frame_id`: frame used for published scans.
-
-### `arcl.*`
-
-- `arcl.enable`: enables the ARCL ROS interface.
-- `arcl.timeout_ms`: timeout used by ARCL service/action calls.
+The published angle increment is inferred from the packet when enough points are available. The configured increment is only used as a fallback.
 
 ## `driver.*`
 
-- `driver.publish_odom`: publishes the AMR odometry topic.
-- `driver.publish_robot_tf`: broadcasts the `odom_frame -> base_frame` transform from `amr_core`.
-- `driver.subscribe_cmd_vel`: enables velocity command subscription.
-- `driver.subscribe_goal_pose`: enables goal pose subscription.
-- `driver.subscribe_initial_pose`: enables initial pose subscription.
-- `driver.subscribe_localplan`: subscribes to `/local_plan` instead of `cmd_vel` when enabled.
-- `driver.odom_topic`: odometry topic name used by `amr_core`.
-- `driver.cmd_vel_topic`: command velocity topic name consumed by `amr_core`.
-- `driver.odom_reset_topic`: topic that triggers odometer reset.
-- `driver.goal_pose_topic`: goal pose topic.
-- `driver.initial_pose_topic`: initial pose topic.
+- `driver.odom_topic`: odometry topic name.
+- `driver.cmd_vel_topic`: velocity command topic consumed by `amr_core`.
+- `driver.stop_topic`: stop command topic.
+- `driver.publish_odom`: enables odometry publication from `amr_core`.
+- `driver.publish_robot_tf`: enables the `odom -> base_link` TF publisher.
 - `driver.odom_frame`: frame id assigned to published odometry.
-- `driver.base_frame`: child frame id assigned to published odometry / TF.
-- `driver.reset_odometer_on_startup`: resets the AMR odometer during node startup.
-- `driver.expected_cmd_vel_freq`: expected command rate used by the driver logic.
-- `driver.command_timeout_ms`: timeout for command/response interactions with the AMR.
+- `driver.base_frame`: child frame id assigned to published odometry and TF.
+- `driver.expected_cmd_vel_freq`: expected command rate used by the watchdog.
 - `driver.min_linear_speed`: minimum linear speed clamp in mm/s.
 - `driver.max_linear_speed`: maximum linear speed clamp in mm/s.
 - `driver.min_angular_speed`: minimum angular speed clamp in deg/s.
 - `driver.max_angular_speed`: maximum angular speed clamp in deg/s.
-- `driver.unit_move_distance`: linear move step sent per command in mm.
-- `driver.unit_turn_angle`: angular turn step sent per command in deg.
+- `driver.drive_throttle_pct`: throttle scaling applied to outgoing drive commands.
+- `driver.unsafe_drive`: enables libaria unsafe drive mode.
+- `driver.cmd_vel_timeout_sec`: timeout for stopping the robot when `cmd_vel` goes stale.
 
-## Digital twin overrides
+## Digital twin overlays
 
-For a simulation-authoritative setup, keep the normal robot defaults in [amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml) and place override values in a separate package-specific file.
+For simulation-authoritative setups, keep the hardware defaults in [../amr_ros/config/parameters.yaml](../amr_ros/config/parameters.yaml) or [../amr_ros/config/ld250_parameters.yaml](../amr_ros/config/ld250_parameters.yaml), then layer a package-specific override file with `extra_params_file`.
 
-The Handsolo twin configuration does this in [omron_handsolo/handsolo_ros/config/handsolo-amr.yaml](../../omron_handsolo/handsolo_ros/config/handsolo-amr.yaml), where it disables:
+The override usually disables:
 
-- raw source-data publication
-- laser scan publication from `amr_core`
-- AMR odometry publication
-- AMR TF publication
-- odometer reset on startup
+- `status.publish`
+- `laser.main_laser.enabled`
+- `laser.low_laser.enabled`
+- `driver.publish_odom`
+- `driver.publish_robot_tf`
 
 That leaves `amr_core` acting as the command bridge while simulation owns TF, odometry, and sensors.
