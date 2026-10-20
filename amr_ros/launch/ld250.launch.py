@@ -22,7 +22,7 @@ def generate_launch_description():
 
     declare_use_nav2 = DeclareLaunchArgument(
         'use_nav2',
-        default_value='false',
+        default_value='true',
         description='Launch the Nav2 stack for the LD250 platform.',
     )
 
