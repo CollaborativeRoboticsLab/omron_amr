@@ -15,6 +15,13 @@
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>geometry_msgs</test_depend>
+  <test_depend>lifecycle_msgs</test_depend>
+  <test_depend>ament_index_python</test_depend>
+  <test_depend>nav2_velocity_smoother</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -44,7 +44,7 @@ bt_navigator:
     use_sim_time: True
     global_frame: map
     robot_base_frame: base_link
-    odom_topic: /amr/odom
+    odom_topic: "odom"
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
@@ -112,6 +112,7 @@ bt_navigator_navigate_to_pose_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: True
+    enable_stamped_cmd_vel: false
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
@@ -296,6 +297,7 @@ smoother_server:
 
 behavior_server:
   ros__parameters:
+    enable_stamped_cmd_vel: false
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
@@ -336,12 +338,13 @@ waypoint_follower:
 
 velocity_smoother:
   ros__parameters:
+    enable_stamped_cmd_vel: false
     use_sim_time: True
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [1.00, 0.0, 1.0]
-    min_velocity: [-1.00, 0.0, -1.0]
+    min_velocity: [-0.20, 0.0, -1.0]
     max_accel: [2.5, 0.0, 3.2]
     max_decel: [-2.5, 0.0, -3.2]
     odom_topic: "odom"

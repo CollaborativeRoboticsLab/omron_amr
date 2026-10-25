@@ -68,7 +68,7 @@ def generate_launch_description():
 
     declare_params_file_cmd = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(package_dir, 'config', 'nav2_default.yaml'),
+        default_value=os.path.join(package_dir, 'config', 'ld250_nav2.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes')
 
     declare_autostart_cmd = DeclareLaunchArgument(
@@ -136,7 +136,7 @@ def generate_launch_description():
                 respawn_delay=2.0,
                 parameters=[configured_params],
                 arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings),
+                remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]),
             Node(
                 package='nav2_bt_navigator',
                 executable='bt_navigator',
@@ -208,7 +208,7 @@ def generate_launch_description():
                 plugin='behavior_server::BehaviorServer',
                 name='behavior_server',
                 parameters=[configured_params],
-                remappings=remappings),
+                remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]),
             ComposableNode(
                 package='nav2_bt_navigator',
                 plugin='nav2_bt_navigator::BtNavigator',

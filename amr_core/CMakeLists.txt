@@ -55,4 +55,19 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(tf2_msgs REQUIRED)
+  ament_add_gtest(test_drive_interface
+    test/test_drive_command_policy.cpp
+    test/test_drive_ratio_mapping.cpp
+    test/test_drive_interface.cpp
+    test/test_drive_tcp_sender.cpp
+  )
+  ament_target_dependencies(test_drive_interface
+    rclcpp tf2_ros tf2_msgs std_msgs nav_msgs geometry_msgs
+  )
+  target_link_libraries(test_drive_interface libaria::ArNetworking)
+endif()
+
 ament_package()
