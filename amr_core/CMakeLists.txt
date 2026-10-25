@@ -58,6 +58,7 @@ install(TARGETS
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(tf2_msgs REQUIRED)
+  find_package(nav2_velocity_smoother REQUIRED)
   ament_add_gtest(test_drive_interface
     test/test_drive_command_policy.cpp
     test/test_drive_ratio_mapping.cpp
@@ -65,7 +66,7 @@ if(BUILD_TESTING)
     test/test_drive_tcp_sender.cpp
   )
   ament_target_dependencies(test_drive_interface
-    rclcpp tf2_ros tf2_msgs std_msgs nav_msgs geometry_msgs
+    rclcpp tf2_ros tf2_msgs std_msgs nav_msgs geometry_msgs nav2_velocity_smoother
   )
   target_link_libraries(test_drive_interface libaria::ArNetworking)
 endif()

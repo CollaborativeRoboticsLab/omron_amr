@@ -27,8 +27,8 @@ hardware gates.
 
 ### Initial Implementation Status
 
-Implemented and verified by 64 passing GoogleTest cases (11 command-policy tests,
-26 loopback ARNetworking tests, 11 mapping tests, 10 local TCP queue tests, and 6 client-adapter
+Implemented and verified by 66 passing GoogleTest cases (11 command-policy tests,
+28 loopback ARNetworking tests, 11 mapping tests, 10 local TCP queue tests, and 6 client-adapter
 tests): a mutex-protected latest-command mailbox,
 steady-clock expiry in the networking callback, 20 Hz default packet generation,
 ordinary zero streaming, explicit stop precedence, joined networking teardown,
@@ -36,13 +36,24 @@ input validation, local asymmetric limit enforcement, and body-frame odometry
 twist. The loopback tests use only an in-process fake server bound to localhost,
 not a mobile robot. `unsafe_drive: true` remains unchanged.
 
-Six additional Nav2 pytest checks cover both launch descriptions, the parameter
+Eleven additional Nav2 pytest checks cover both launch descriptions, the parameter
 file default, nominal limits/rates, odometry topics, explicit Twist types, and
 actual installed smoother traffic/QoS in an isolated localhost ROS domain. Both
 controller and behavior output now enter the smoother; its reverse limit matches
 the driver's -0.2 m/s clamp. OPEN_LOOP feedback and existing acceleration/timeouts
-remain unchanged. Deployment namespaces, publisher arbitration, physical limits,
+remain unchanged. Namespace arguments, relative topics, parameter overlays, and
+two-namespace command isolation are covered offline. Publisher arbitration, physical limits,
 and the smoother-to-driver end-to-end timeout budget remain open.
+
+Two new full-chain localhost tests confirm that upstream silence is masked by
+the smoother's retained target, while smoother failure triggers the driver's
+independent watchdog even with ROS executor progress blocked. A focused run
+observed zero ratios at 1.265 s and a stop request at 1.447 s after upstream
+loss, versus a stop request 0.181 s after smoother deactivation. These are
+fake-server observations, not physical stopping limits. Fresh input resumes
+after an ordinary stop; silence does not replay the old target. Timeouts remain
+unchanged. Exclusive-source/break-before-make ownership is documented, not
+enforced by a new mux. Hardware/Nav2/RViz bringup accepts a shared namespace.
 
 The next software tranche adds confirmed startup mode gating and periodic
 `getSafeDrive` monitoring. Startup rejects missing, malformed, or mismatched
@@ -105,10 +116,10 @@ colcon test --packages-select amr_core amr_nav2
 colcon test-result --verbose
 ```
 
-Result: both affected packages build and all 64 GoogleTest cases plus six Nav2
-pytest checks pass. Colcon reports 72 tests including wrappers, with zero errors,
-failures, or skipped tests. The editor retains ROS include-path diagnostics,
-but the actual ROS compiler succeeds.
+Result: both affected packages build and all 66 GoogleTest cases plus six Nav2
+pytest checks pass. Colcon reports 74 tests including wrappers, with zero errors,
+failures, or skipped tests. Runtime tests were restricted to localhost. The
+editor retains ROS include-path diagnostics, but the actual ROS compiler succeeds.
 Both hardware YAML configurations parse with `send_frequency: 20.0` and
 `unsafe_drive: true`. No commands were sent to a physical robot.
 
@@ -320,11 +331,16 @@ pose and twist conventions without changing topic or frame names unnecessarily.
 	Check composed and standalone launches, namespaces, command message types, and
 	publisher/subscriber QoS on the deployed ROS distribution.
 	Offline checks now cover both launch descriptions and installed Jazzy smoother
-	Twist/QoS. Both controller and behaviors pass through smoothing. Namespaced
-	hardware overlays and the live graph remain unverified.
+	Twist/QoS. Both controller and behaviors pass through smoothing. Standard node
+	namespaces and relative default topics are implemented; dummy-node tests verify
+	parameter overlays and two-namespace command/TF topic isolation. The live graph
+	remains unverified.
 - [ ] F2. Ensure only the intended publisher owns the final command topic during
 	autonomous operation. Define manual/automatic arbitration rather than allowing
 	independent publishers to interleave commands accidentally.
+	Exclusive-source and break-before-make contracts are documented. Runtime
+	source selection, retained-target clearing, and handover enforcement remain
+	open; current launch files are not an automatic arbitration mechanism.
 - [ ] F3. Align Nav2 forward/reverse, angular, and acceleration limits with
 	measured robot capability and the corrected mapping.
 	Nominal smoother reverse now matches -0.2 m/s; configured forward/angular
@@ -334,6 +350,9 @@ pose and twist conventions without changing topic or frame names unnecessarily.
 - [ ] F5. Choose command expiry from measured publishing jitter and an explicit
 	stopping-latency budget. Review the current driver 0.2 s and smoother 1.0 s
 	timeouts as different layers; do not increase either just to hide interruptions.
+	Full-chain tests now demonstrate the masking/deceleration/expiry sequence
+	and smoother-failure watchdog behavior. A physical stopping budget and measured
+	deployment jitter are still required before retuning either timeout.
 - [ ] F6. Add restrained diagnostics for command age, sender rate, expiry count,
 	rejected commands, clipping, connection state, and stop reason. Prefer existing
 	logging/diagnostic facilities over introducing an unrelated telemetry system.
@@ -387,6 +406,9 @@ covered by that target; avoid creating a broad test framework.
 - [x] T13. Check Nav2 standalone/composed remappings, default YAML existence,
 	Twist configuration, nominal limits/rates, and odometry topics; validate the
 	installed smoother's Twist/QoS on localhost without launching a robot driver.
+- [x] T14. Test upstream command loss and smoother failure through the actual
+	smoother/driver/fake-server chain. Record packet timing, verify no stale restart
+	during silence, and verify recovery requires fresh upstream input.
 
 Example workspace commands after test registration and sourcing the appropriate
 ROS environment:

@@ -17,11 +17,11 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushRosNamespace, SetRemap
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import HasNodeParams, RewrittenYaml
 
@@ -49,13 +49,15 @@ def generate_launch_description():
     param_substitutions = {
         'use_sim_time': use_sim_time}
 
-    configured_params = ParameterFile(
-        RewrittenYaml(
+    configured_yaml = RewrittenYaml(
             source_file=params_file,
             root_key=namespace,
             param_rewrites=param_substitutions,
-            convert_types=True),
-            allow_substs=True)
+            convert_types=True)
+    configured_params = ParameterFile(configured_yaml, allow_substs=True)
+    default_slam_params = RewrittenYaml(
+        source_file=os.path.join(slam_toolbox_dir, 'config', 'mapper_params_online_sync.yaml'),
+        root_key=namespace, param_rewrites=param_substitutions, convert_types=True)
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -74,7 +76,7 @@ def generate_launch_description():
     
     declare_params_file_cmd = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(package_dir, 'config', 'nav2_default.yaml'),
+        default_value=os.path.join(package_dir, 'config', 'ld250_nav2.yaml'),
         description='Full path to the ROS2 parameters file to use for all launched nodes')
 
     declare_use_respawn_cmd = DeclareLaunchArgument(
@@ -88,6 +90,7 @@ def generate_launch_description():
     # Nodes launching commands
 
     start_map_saver_server_cmd = Node(
+            namespace=namespace,
             package='nav2_map_server',
             executable='map_saver_server',
             output='screen',
@@ -97,6 +100,7 @@ def generate_launch_description():
             parameters=[configured_params])
 
     start_lifecycle_manager_cmd = Node(
+            namespace=namespace,
             package='nav2_lifecycle_manager',
             executable='lifecycle_manager',
             name='lifecycle_manager_slam',
@@ -115,13 +119,14 @@ def generate_launch_description():
 
     start_slam_toolbox_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(slam_launch_file),
-        launch_arguments={'use_sim_time': use_sim_time}.items(),
+        launch_arguments={'use_sim_time': use_sim_time,
+                  'slam_params_file': default_slam_params}.items(),
         condition=UnlessCondition(has_slam_toolbox_params))
 
     start_slam_toolbox_cmd_with_params = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(slam_launch_file),
         launch_arguments={'use_sim_time': use_sim_time,
-                          'slam_params_file': params_file}.items(),
+                          'slam_params_file': configured_yaml}.items(),
         condition=IfCondition(has_slam_toolbox_params))
 
     ld = LaunchDescription()
@@ -137,9 +142,11 @@ def generate_launch_description():
     # Running Map Saver Server
     ld.add_action(start_map_saver_server_cmd)
     ld.add_action(start_lifecycle_manager_cmd)
-
-    # Running SLAM Toolbox (Only one of them will be run)
-    ld.add_action(start_slam_toolbox_cmd)
-    ld.add_action(start_slam_toolbox_cmd_with_params)
+    ld.add_action(GroupAction([
+        PushRosNamespace(namespace),
+        SetRemap('/tf', 'tf'), SetRemap('/tf_static', 'tf_static'),
+        SetRemap('/scan', 'scan'), SetRemap('/map', 'map'),
+        start_slam_toolbox_cmd, start_slam_toolbox_cmd_with_params,
+    ]))
 
     return ld

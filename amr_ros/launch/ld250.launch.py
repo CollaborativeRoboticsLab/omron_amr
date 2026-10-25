@@ -13,6 +13,12 @@ def generate_launch_description():
     extra_params_file = LaunchConfiguration('extra_params_file')
     robot_description_override = LaunchConfiguration('robot_description_override')
     nav2_params_file = LaunchConfiguration('nav2_params_file')
+    namespace = LaunchConfiguration('namespace')
+
+    declare_namespace = DeclareLaunchArgument(
+        'namespace', default_value='',
+        description='Robot namespace shared by hardware and Nav2.',
+    )
 
     declare_rviz = DeclareLaunchArgument(
         'rviz',
@@ -59,6 +65,7 @@ def generate_launch_description():
             ])
         ),
         launch_arguments={
+            'namespace': namespace,
             'params_file': PathJoinSubstitution([FindPackageShare('amr_ros'), 'config', 'ld250_parameters.yaml']),
             'extra_params_file': extra_params_file,
             'robot_description_override': robot_description_override,
@@ -74,6 +81,7 @@ def generate_launch_description():
             ])
         ),
         condition=IfCondition(rviz),
+        launch_arguments={'namespace': namespace}.items(),
     )
 
     nav2_launch = IncludeLaunchDescription(
@@ -86,12 +94,14 @@ def generate_launch_description():
         ),
         condition=IfCondition(use_nav2),
         launch_arguments={
+            'namespace': namespace,
             'params_file': nav2_params_file,
             'slam': use_slam,
         }.items(),
     )
 
     return LaunchDescription([
+        declare_namespace,
         declare_rviz,
         declare_use_nav2,
         declare_use_slam,

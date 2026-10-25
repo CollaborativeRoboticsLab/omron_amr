@@ -3,7 +3,8 @@ import sys
 import yaml
 import json
 from launch import LaunchDescription
-from launch.substitutions import Command
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -24,11 +25,14 @@ def generate_launch_description():
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
+        namespace=LaunchConfiguration('namespace'),
+        remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
         output='log',
         arguments=['-d', rviz_config_file],
         )
     
     return LaunchDescription([
-        rviz_node
-        ])
+        DeclareLaunchArgument('namespace', default_value=''),
+        rviz_node,
+    ])
 

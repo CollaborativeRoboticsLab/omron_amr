@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <tf2_msgs/msg/tf_message.hpp>
+#include <nav2_velocity_smoother/velocity_smoother.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -23,6 +24,7 @@ protected:
     double rotation;
     double throttle;
     double lateral;
+    std::chrono::steady_clock::time_point received_at{ std::chrono::steady_clock::now() };
   };
 
   struct Telemetry
@@ -113,6 +115,19 @@ protected:
 
   void TearDown() override
   {
+    if (smoother_)
+    {
+      if (smoother_->get_current_state().label() == "active")
+      {
+        smoother_->deactivate();
+      }
+      if (smoother_->get_current_state().label() == "inactive")
+      {
+        smoother_->cleanup();
+      }
+      executor_.remove_node(smoother_->get_node_base_interface());
+      smoother_.reset();
+    }
     driver_.reset();
     if (executor_added_)
     {
@@ -164,6 +179,35 @@ protected:
       }
     }
     return false;
+  }
+
+  void initializeSmootherChain()
+  {
+    node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
+    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 0.2));
+    initializeDriver();
+    rclcpp::NodeOptions options;
+    options.arguments({ "--ros-args", "-r", "__ns:=/drive_chain_test", "-r",
+                        "cmd_vel:=/drive_chain_test/cmd_vel_nav", "-r",
+                        "cmd_vel_smoothed:=/drive_test/cmd_vel" });
+    options.parameter_overrides({ { "use_sim_time", false }, { "enable_stamped_cmd_vel", false },
+                                  { "feedback", "OPEN_LOOP" }, { "smoothing_frequency", 20.0 },
+                                  { "velocity_timeout", 1.0 },
+                                  { "max_velocity", std::vector<double>{ 1.0, 0.0, 1.0 } },
+                                  { "min_velocity", std::vector<double>{ -0.2, 0.0, -1.0 } },
+                                  { "max_accel", std::vector<double>{ 2.5, 0.0, 3.2 } },
+                                  { "max_decel", std::vector<double>{ -2.5, 0.0, -3.2 } } });
+    smoother_ = std::make_shared<nav2_velocity_smoother::VelocitySmoother>(options);
+    executor_.add_node(smoother_->get_node_base_interface());
+    ASSERT_EQ(smoother_->configure().label(), "inactive");
+    ASSERT_EQ(smoother_->activate().label(), "active");
+    upstream_ = node_->create_publisher<geometry_msgs::msg::Twist>("/drive_chain_test/cmd_vel_nav", 1);
+    ASSERT_TRUE(waitWithExecutor([this]() {
+      geometry_msgs::msg::Twist command;
+      command.linear.x = 0.6;
+      upstream_->publish(command);
+      return receivedDrive(50.0, 0.0);
+    }));
   }
 
   void recordDrive(ArServerClient*, ArNetPacket* packet)
@@ -321,6 +365,8 @@ protected:
   bool executor_added_{ false };
   rclcpp::Node::SharedPtr node_;
   std::unique_ptr<DriverInterface> driver_;
+  std::shared_ptr<nav2_velocity_smoother::VelocitySmoother> smoother_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr upstream_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
   rclcpp::executors::SingleThreadedExecutor executor_;
   std::mutex mutex_;
@@ -336,6 +382,77 @@ protected:
   bool truncate_odometry_{ false };
   Telemetry telemetry_;
 };
+
+TEST_F(DriverInterfaceLoopbackTest, UpstreamLossWaitsForSmootherTimeoutThenDeceleratesAndExpires)
+{
+  initializeSmootherChain();
+  const auto upstream_lost = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([upstream_lost]() {
+    return std::chrono::steady_clock::now() - upstream_lost >= 350ms;
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_TRUE(std::any_of(records_.begin(), records_.end(), [upstream_lost](const Record& record) {
+      return record.received_at > upstream_lost + 250ms && !record.stop && record.translation > 0.0;
+    }));
+    EXPECT_FALSE(std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; }));
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(0.0, 0.0); }));
+  std::chrono::steady_clock::time_point zero_received;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto zero = std::find_if(records_.begin(), records_.end(), [](const Record& record) {
+      return !record.stop && record.translation == 0.0 && record.rotation == 0.0;
+    });
+    ASSERT_NE(zero, records_.end());
+    zero_received = zero->received_at;
+  }
+  EXPECT_GE(zero_received - upstream_lost, 900ms);
+  EXPECT_LT(zero_received - upstream_lost, 2s);
+  RecordProperty("upstream_loss_to_zero_sec", std::chrono::duration<double>(zero_received - upstream_lost).count());
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !records_.empty() && records_.back().stop;
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_GE(records_.back().received_at - zero_received, 150ms);
+    EXPECT_LT(records_.back().received_at - zero_received, 700ms);
+    RecordProperty("upstream_loss_to_stop_sec",
+             std::chrono::duration<double>(records_.back().received_at - upstream_lost).count());
+  }
+  const auto stopped = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([stopped]() { return std::chrono::steady_clock::now() - stopped >= 300ms; }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_FALSE(std::any_of(records_.begin(), records_.end(), [stopped](const Record& record) {
+      return record.received_at > stopped && !record.stop && record.translation != 0.0;
+    }));
+  }
+  const auto resumed = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([this, resumed]() {
+    geometry_msgs::msg::Twist command;
+    command.linear.x = 0.3;
+    upstream_->publish(command);
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [resumed](const Record& record) {
+      return record.received_at > resumed && !record.stop && std::fabs(record.translation - 25.0) < 1e-3;
+    });
+  }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, SmootherFailureStopsViaDriverWatchdogWithoutExecutorProgress)
+{
+  initializeSmootherChain();
+  ASSERT_EQ(smoother_->deactivate().label(), "inactive");
+  const auto smoother_stopped = std::chrono::steady_clock::now();
+  std::unique_lock<std::mutex> lock(mutex_);
+  ASSERT_TRUE(changed_.wait_for(lock, 1s, [this]() { return !records_.empty() && records_.back().stop; }));
+  EXPECT_LT(records_.back().received_at - smoother_stopped, 700ms);
+  EXPECT_GE(records_.back().received_at - smoother_stopped, 100ms);
+  RecordProperty("smoother_shutdown_to_stop_sec",
+                 std::chrono::duration<double>(records_.back().received_at - smoother_stopped).count());
+}
 
 TEST_F(DriverInterfaceLoopbackTest, RelativeOdometryAtZeroDegreeOrigin)
 {

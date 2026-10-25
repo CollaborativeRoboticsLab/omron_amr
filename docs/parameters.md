@@ -269,10 +269,9 @@ capabilities. Agreement with configured clamps is not evidence of calibrated
 physical velocity tracking.
 
 Both Nav2 odometry consumers now default to relative `odom`, matching `/odom`
-in the unnamespaced hardware configuration. Namespaced deployments must supply
-matching driver topic/frame overlays; the hardware's absolute `/cmd_vel` and
-`/odom` defaults do not automatically follow a Nav2 namespace. Prefer the LD250
-wrapper for bringup; composed mode expects its component container.
+in the unnamespaced hardware configuration. Hardware command, odometry, stop,
+and Nav2 scan topics are relative, so they follow the node namespace. Prefer
+the LD250 wrapper for bringup; composed mode expects its component container.
 
 The smoother's 1.0-second input timeout and driver's 0.2-second receive timeout
 are separate. While the smoother republishes a retained target, the driver sees
@@ -286,6 +285,83 @@ Loopback odometry tests cover nonzero position origins, headings 0/+90/-90,
 bidirectional wrap across +/-180 degrees, body-frame twist, frame IDs, and
 identical TF/odometry timestamps and poses. They test the assumed packet schema,
 not the installed firmware or physical heading response.
+
+### End-to-End Command Loss
+
+Two tests run the installed Jazzy smoother and real driver against a fake
+localhost ARNetworking server. With 20 Hz smoothing/sending, 1.0 s upstream
+timeout, 2.5 m/s2 deceleration, 0.6 m/s input, and 0.2 s driver expiry, one
+focused run observed:
+
+| Event | Time From Loss |
+| --- | --- |
+| First zero ratio after upstream silence | 1.265 s |
+| Stop request after upstream silence | 1.447 s |
+| Stop request after smoother deactivation | 0.181 s |
+
+These are scheduler-dependent fake-server packet arrival times, not physical
+stopping times or guaranteed bounds. During upstream silence, nonzero ratios
+continue past the driver's receive timeout because the smoother keeps publishing
+its retained target. After its own timeout, it decelerates to zero; when smoother
+output then ceases, the driver expires that last input and requests stop. The
+test checks no autonomous restart during silence and resumption on fresh input.
+The separate smoother-failure case blocks ROS executor progress and confirms
+the independent networking watchdog still requests stop. GoogleTest XML stores
+these timing properties for later comparisons. Runtime timeouts are unchanged.
+
+### Command Ownership Contract
+
+The current contract is exclusive ownership, not priority-based automatic
+arbitration. During autonomy, only the smoother may publish the final driver
+command topic; controller and behavior tasks share its input under Nav2 task
+management. ROS joystick input must remain disconnected from that input and the
+final topic unless manual mode has been explicitly selected.
+
+Handover must be break-before-make: cancel the outgoing task, quiesce its command
+sources, clear the smoother's retained target, let output cease, and require
+fresh input from the incoming source before re-enabling motion. A driver stop
+alone is insufficient while a smoother can immediately republish an old target.
+In manual mode, keep autonomous command producers inactive and route the selected
+deadman-gated joystick through the smoother, never alongside it on the final
+topic. Reverse the sequence to restore autonomy; never replay a saved target.
+Physical joystick priority and independent emergency protection remain separate
+firmware/hardware acceptance requirements.
+
+This is a deployment requirement, not an implemented mux or mode manager. The
+current launch files do not enforce it. Before enabling concurrent manual/Nav2
+bringup, implement and test source selection, zero/deadman behavior, retained-
+target clearing, and failure handling. Checking publisher counts alone does not
+provide arbitration or prevent in-flight commands during handover.
+
+### Namespace Contract
+
+For a namespace such as `/amr1`, controller/behavior output must resolve to
+`/amr1/cmd_vel_nav`, smoother output and driver input to `/amr1/cmd_vel`, odometry
+to `/amr1/odom`, and the explicit stop input to `/amr1/stop`. Manual inputs must
+be separately named until explicitly selected. Nav2 already uses relative
+remappings internally, and the hardware YAML uses relative topics too.
+
+The LD250 wrapper passes its `namespace` launch argument to hardware, Nav2, and
+optional RViz. For a connected robot, use:
+
+```bash
+ros2 launch amr_ros ld250.launch.py namespace:=amr1
+```
+
+Omit `namespace` to preserve the unnamespaced behavior. The core launch also
+accepts it directly: `ros2 launch amr_ros amr_core.launch.py namespace:=amr1`.
+Nodes and components receive the standard ROS namespace; no custom driver
+parameter or topic-prefixing code is needed. Parameter files and
+`extra_params_file` overlays retain their ordinary node keys (`amr_core`, for
+example); launch scopes these files under the selected namespace. Explicit
+absolute topics in site overlays remain absolute and bypass namespace isolation.
+
+`/tf` and `/tf_static` are remapped to relative `tf` and `tf_static`, giving each
+robot its own TF topics. Frame IDs remain `map`, `odom`, and `base_link`; they
+are not automatically prefixed. Consumers must use the same namespaced TF
+topics. A shared global TF tree with prefixed frames requires separate coordinated
+configuration. Offline tests cover parameter overlays and command/TF topic
+isolation using dummy nodes; the live multi-robot graph remains unverified.
 
 ## Digital twin overlays
 

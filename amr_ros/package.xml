@@ -11,6 +11,7 @@
 
   <exec_depend>amr_core</exec_depend>
   <exec_depend>amr_nav2</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

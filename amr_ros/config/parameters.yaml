@@ -38,9 +38,9 @@ amr_core:
         range_max: 4.0
 
     driver:
-      odom_topic: "/odom"
-      cmd_vel_topic: "/cmd_vel"
-      stop_topic: "/stop"
+      odom_topic: "odom"
+      cmd_vel_topic: "cmd_vel"
+      stop_topic: "stop"
       publish_odom: true
       publish_robot_tf: true
       odom_frame: "odom"
