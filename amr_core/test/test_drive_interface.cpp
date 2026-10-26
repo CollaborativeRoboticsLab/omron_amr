@@ -194,7 +194,7 @@ protected:
                                   { "feedback", "OPEN_LOOP" }, { "smoothing_frequency", 20.0 },
                                   { "velocity_timeout", 1.0 },
                                   { "max_velocity", std::vector<double>{ 1.0, 0.0, 1.0 } },
-                                  { "min_velocity", std::vector<double>{ -0.2, 0.0, -1.0 } },
+                                  { "min_velocity", std::vector<double>{ -0.1, 0.0, -1.0 } },
                                   { "max_accel", std::vector<double>{ 2.5, 0.0, 3.2 } },
                                   { "max_decel", std::vector<double>{ -2.5, 0.0, -3.2 } } });
     smoother_ = std::make_shared<nav2_velocity_smoother::VelocitySmoother>(options);
@@ -206,7 +206,7 @@ protected:
       geometry_msgs::msg::Twist command;
       command.linear.x = 0.6;
       upstream_->publish(command);
-      return receivedDrive(50.0, 0.0);
+      return receivedDrive(60.0, 0.0);
     }));
   }
 
@@ -436,7 +436,7 @@ TEST_F(DriverInterfaceLoopbackTest, UpstreamLossWaitsForSmootherTimeoutThenDecel
     upstream_->publish(command);
     std::lock_guard<std::mutex> lock(mutex_);
     return std::any_of(records_.begin(), records_.end(), [resumed](const Record& record) {
-      return record.received_at > resumed && !record.stop && std::fabs(record.translation - 25.0) < 1e-3;
+      return record.received_at > resumed && !record.stop && std::fabs(record.translation - 30.0) < 1e-3;
     });
   }));
 }
@@ -489,7 +489,7 @@ TEST_F(DriverInterfaceLoopbackTest, CalibratesReverseIndependentlyOfPermittedSpe
   configureCalibration();
   initializeDriver();
   publish(-1.0, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-40.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-20.0, 0.0); }));
 }
 
 TEST_F(DriverInterfaceLoopbackTest, CalibratesThrottleAndTurningUsingBodySpeedFeedback)
@@ -602,11 +602,11 @@ TEST_F(DriverInterfaceLoopbackTest, StreamsZeroWithoutStopAndPreservesUnsafeMode
 {
   initializeDriver();
   publish(0.6, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
   publish(0.0, 0.0);
   ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(0.0, 0.0); }));
   publish(0.3, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(25.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(30.0, 0.0); }));
   std::lock_guard<std::mutex> lock(mutex_);
   EXPECT_EQ(requested_safe_mode_, 0);
   for (const auto& record : records_)
@@ -621,7 +621,7 @@ TEST_F(DriverInterfaceLoopbackTest, ExpiresEvenWhenRosExecutorIsNotSpinning)
 {
   initializeDriver();
   publish(0.6, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
   std::unique_lock<std::mutex> lock(mutex_);
   ASSERT_TRUE(changed_.wait_for(lock, 2s, [this]() { return !records_.empty() && records_.back().stop; }));
   const auto stopped_count = records_.size();
@@ -632,7 +632,7 @@ TEST_F(DriverInterfaceLoopbackTest, EnforcesConfiguredReverseLimitBeforeRatioCon
 {
   initializeDriver();
   publish(-1.0, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-100.0 / 6.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-10.0, 0.0); }));
 }
 
 TEST_F(DriverInterfaceLoopbackTest, KeepsOdometryTwistInBodyFrameAtNinetyDegreeOrigin)
@@ -701,7 +701,7 @@ TEST_F(DriverInterfaceLoopbackTest, StopsAndLatchesOffWhenModeChangesWithoutForc
 {
   initializeDriver();
   publish(0.6, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
   {
     std::unique_lock<std::mutex> lock(mutex_);
     mode_reply_override_ = 1;
@@ -711,7 +711,7 @@ TEST_F(DriverInterfaceLoopbackTest, StopsAndLatchesOffWhenModeChangesWithoutForc
   publish(0.3, 0.0);
   const auto deadline = std::chrono::steady_clock::now() + 150ms;
   EXPECT_TRUE(waitWithExecutor([deadline]() { return std::chrono::steady_clock::now() >= deadline; }));
-  EXPECT_FALSE(receivedDrive(25.0, 0.0));
+  EXPECT_FALSE(receivedDrive(30.0, 0.0));
   std::lock_guard<std::mutex> lock(mutex_);
   EXPECT_TRUE(records_.back().stop);
   EXPECT_EQ(mode_set_count_, 1);
@@ -723,7 +723,7 @@ TEST_F(DriverInterfaceLoopbackTest, StopsWhenModeRepliesCeaseWithoutRosExecutorP
   node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 3.0));
   initializeDriver();
   publish(0.6, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
   std::unique_lock<std::mutex> lock(mutex_);
   suppress_mode_replies_ = true;
   ASSERT_TRUE(changed_.wait_for(lock, 1s, [this]() { return !records_.empty() && records_.back().stop; }));

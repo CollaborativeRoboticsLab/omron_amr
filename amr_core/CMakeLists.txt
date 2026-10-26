@@ -57,6 +57,7 @@ install(TARGETS
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   find_package(tf2_msgs REQUIRED)
   find_package(nav2_velocity_smoother REQUIRED)
   ament_add_gtest(test_drive_interface
@@ -69,6 +70,13 @@ if(BUILD_TESTING)
     rclcpp tf2_ros tf2_msgs std_msgs nav_msgs geometry_msgs nav2_velocity_smoother
   )
   target_link_libraries(test_drive_interface libaria::ArNetworking)
+
+  add_executable(amr_hardware_probe test/hardware/readonly_probe.cpp)
+  find_package(nlohmann_json REQUIRED)
+  target_link_libraries(amr_hardware_probe libaria::ArNetworking nlohmann_json::nlohmann_json)
+  ament_add_gtest(test_hybrid_config test/hardware/test_hybrid_config.cpp)
+  target_link_libraries(test_hybrid_config libaria::ArNetworking nlohmann_json::nlohmann_json)
+  ament_add_pytest_test(test_hardware_capture test/test_hardware_capture.py)
 endif()
 
 ament_package()

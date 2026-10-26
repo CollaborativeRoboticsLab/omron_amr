@@ -50,8 +50,8 @@ amr_core:
       tcp_queue_max_packets: 32
       tcp_queue_max_bytes: 65536
       tcp_queue_max_age_sec: 0.1
-      min_linear_speed: -200.0
-      max_linear_speed: 1200.0
+      min_linear_speed: -100.0
+      max_linear_speed: 1000.0
       min_angular_speed: -60.0
       max_angular_speed: 60.0
       drive_throttle_pct: 100.0

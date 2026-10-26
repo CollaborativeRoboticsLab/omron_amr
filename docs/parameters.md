@@ -196,6 +196,60 @@ is published directly in the configured child/body frame rather than rotated by
 the initial heading. The installed firmware's packet schema still needs live
 verification.
 
+### Captured LD-250 Mapping Blockers
+
+The 2026-10-26 read-only capture reports `TransVelMax=1000` and
+`TransNegVelMax=-100` mm/s. Default driver translation caps now match those
+values, and the Nav2 smoother spans -0.10 to 1.00 m/s. This does not make legacy
+ratio mapping calibrated: its symmetric normalization leaves the whole permitted
+reverse range inside the original captured 10% translation dead zone. The live
+translation dead zone was subsequently changed to 14% for a persistence test;
+the current state and restart result are recorded below.
+
+The matching server's ratio-action descriptions and bundled SDK resolve zero
+`FullThrottleForwards` to `TransVelMax` and zero `FullThrottleBackwards` to one
+quarter of `TransVelMax`. This gives candidate full-ratio gains of 1000/250 mm/s,
+separate from the forward/reverse speed caps. Captured turn gains are 50/25/25
+degrees/s. The seven zero-valued teleop limit/acceleration settings still need
+their own installed-firmware inheritance confirmation. None of these observations
+automatically sets calibration values or confirms the installed control contract.
+
+At the original 10% translation dead zone, even under that candidate model,
+nonzero forward targets at or below 0.10 m/s
+and reverse targets at or below 0.025 m/s in magnitude fall in the dead zone at
+100% throttle. Boosting them would change the requested velocity. Keep calibration
+disabled until a vendor-confirmed configuration or absolute-velocity interface
+supports the required Nav2 envelope and supervised physical acceptance passes.
+The permanent hardware capture artifact includes a conservative
+`ratio_mapping_assessment` listing these gates without enabling motion.
+
+### Calibration Handoff: 2026-10-26
+
+Work is paused with the robot at **14% translation / 5% rotation dead zone**.
+The original 10% / 5% values have not been restored. At 05:19:52Z, the
+operator-approved header-only writer changed only numeric `TransDeadZone`
+from 10 to 14. Stationary preflight, configuration comparison, receipt, and
+independent read-back passed; no other captured value or property metadata changed.
+After the operator restarted the robot, `getConfigValues` at 05:24:47Z again
+reported 14% / 5%. Numeric persistence passed for that single restart without
+property, save, reload, or restart commands from the tooling.
+
+This is not a calibrated motion profile or a low-speed improvement. At 100%
+throttle under the still-unconfirmed candidate gains above, a 14% translation
+dead zone gives forward/reverse boundaries of 0.14/0.035 m/s in magnitude.
+The whole locally permitted legacy reverse range remains unrepresentable.
+`ratio_mapping: legacy`, `calibration.confirmed: false`, and `unsafe_drive: true`
+remain unchanged. No motion commands or 5%/3%/1% trials were run.
+
+On resumption, check Ethernet selection, capture fresh read-only settings, and
+get fresh operator approval for any restoration, dead-zone reduction, or motion
+test. Do not repeat the completed 10-to-14 write automatically. Remaining gates
+include firmware inheritance/control semantics, watchdogs, ownership, protective
+functions, physical drift/tracking, and exact restoration of property state.
+The [hardware calibration procedure](../amr_core/test/hardware/README.md) records
+the commands, audit artifacts, 14 passing offline C++ tests, and 25 passing
+offline Python safeguards. Raw captures may contain credentials and stay private.
+
 ### Calibration Capture and Acceptance
 
 1. Keep the ROS driver stopped and motion inhibited under the site's procedure.
@@ -242,9 +296,11 @@ export: `DefaultConfig/SimBaseConfig/aramConfig_LD-250.txt`. Its teleop values a
 and 10%/5% translation/rotation dead zones. They are evidence of configuration
 names only and are deliberately not installed into the calibration YAML. At
 100% throttle under that model, forward targets at or below 0.12 m/s and reverse
-targets at or below 0.02 m/s cannot be reproduced continuously. Actual installed
-values, firmware semantics, joystick sharing, physical tracking, and stopping
-remain unverified. No physical robot commands were sent during software tests.
+targets at or below 0.02 m/s cannot be reproduced continuously. Live numeric
+settings and the later persistence experiment are recorded above; firmware
+semantics, joystick sharing, physical tracking, and stopping remain unverified.
+Offline software tests send no robot commands. The separately approved live
+configuration write sent no motion commands and did not enable calibration.
 
 ### Offline Nav2 Integration Checks
 

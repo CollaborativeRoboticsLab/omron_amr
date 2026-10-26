@@ -97,8 +97,8 @@ public:
     drive_send_frequency_ = getOrDeclareParameter<double>("driver.send_frequency", 20.0);
     min_ang_speed_ = getOrDeclareParameter<double>("driver.min_angular_speed", -60.0);  // deg/s
     max_ang_speed_ = getOrDeclareParameter<double>("driver.max_angular_speed", 60.0);   // deg/s
-    min_lin_speed_ = getOrDeclareParameter<double>("driver.min_linear_speed", -200.0);  // mm/s
-    max_lin_speed_ = getOrDeclareParameter<double>("driver.max_linear_speed", 1200.0);  // mm/s
+    min_lin_speed_ = getOrDeclareParameter<double>("driver.min_linear_speed", -100.0);  // mm/s
+    max_lin_speed_ = getOrDeclareParameter<double>("driver.max_linear_speed", 1000.0);  // mm/s
     drive_throttle_pct_ = getOrDeclareParameter<double>("driver.drive_throttle_pct", 100.0);
     unsafe_drive_ = getOrDeclareParameter<bool>("driver.unsafe_drive", true);
     cmd_vel_timeout_sec_ = getOrDeclareParameter<double>("driver.cmd_vel_timeout_sec", 0.2);

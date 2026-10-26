@@ -34,6 +34,18 @@ TEST(DriveRatioMapping, InvertsThrottleOnBothAxes)
   EXPECT_EQ(mapping.map(0.0, 0.0, 0.0, {}).error, MappingError::None);
 }
 
+TEST(DriveRatioMapping, CandidateCapturedEnvelopeKeepsReverseGainSeparateFromRobotCap)
+{
+  Mapping mapping({ 1000.0, 250.0, 50.0, 25.0, 25.0, 10.0, 5.0, 0.2 });
+  const auto reverse = mapping.map(-0.10, 0.0, 100.0, {});
+  ASSERT_EQ(reverse.error, MappingError::None);
+  EXPECT_DOUBLE_EQ(reverse.translation_pct, -40.0);
+  EXPECT_EQ(mapping.map(-0.025, 0.0, 100.0, {}).error, MappingError::UnrepresentableTranslation);
+  EXPECT_EQ(mapping.map(0.10, 0.0, 100.0, {}).error, MappingError::UnrepresentableTranslation);
+  EXPECT_EQ(mapping.map(-0.026, 0.0, 100.0, {}).error, MappingError::None);
+  EXPECT_EQ(mapping.map(0.101, 0.0, 100.0, {}).error, MappingError::None);
+}
+
 TEST(DriveRatioMapping, ReverseTurningUsesForwardSpeedDenominator)
 {
   Mapping mapping(calibration());

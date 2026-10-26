@@ -250,6 +250,20 @@ def test_navigation_odometry_topics_agree_for_the_default_unnamespaced_launch():
         assert hardware['amr_core']['ros__parameters']['driver']['odom_topic'] == 'odom'
 
 
+def test_reverse_limits_match_read_only_robot_configuration():
+    smoother = navigation_parameters()['velocity_smoother']['ros__parameters']
+    assert smoother['min_velocity'][0] == -0.10
+    for filename in ('parameters.yaml', 'ld250_parameters.yaml'):
+        hardware = yaml.safe_load((PACKAGE.parent / 'amr_ros' / 'config' / filename).read_text())
+        driver = hardware['amr_core']['ros__parameters']['driver']
+        assert driver['min_linear_speed'] == -100.0
+        assert driver['max_linear_speed'] == 1000.0
+        assert smoother['max_velocity'][0] == driver['max_linear_speed'] / 1000.0
+        assert driver['ratio_mapping'] == 'legacy'
+        assert driver['calibration']['confirmed'] is False
+        assert driver['unsafe_drive'] is True
+
+
 def test_installed_smoother_publishes_reliable_twist_on_isolated_localhost(monkeypatch):
     from ament_index_python.packages import get_package_prefix
     from geometry_msgs.msg import Twist
