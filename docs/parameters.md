@@ -88,6 +88,97 @@ The published angle increment is inferred from the packet when enough points are
 
 ### Command and Stop Behavior
 
+#### Docking Readiness Gate
+
+[docking_interface.hpp](../amr_core/include/amr_core/interfaces/docking_interface.hpp)
+provides a header-only `amr_core::DockingInterface` shared with `DriverInterface`.
+It starts `Unknown`. Ordinary velocity is admitted only in `Ready` with fresh
+verified `Undocked` feedback. Docked, undocking, cable-connected, unknown, stale,
+and failed states inhibit velocity. Receiving `cmd_vel` never requests undocking.
+Commands received while inhibited are discarded, not buffered for departure.
+A readiness transition invalidates an accepted target even if readiness returns
+before the next network cycle; fresh velocity input is required after the
+resulting stop submission. Existing explicit stops remain available.
+
+`CoreNode` owns the relative `undock_robot` ROS action server using the installed
+Jazzy `nav2_msgs/action/UndockRobot` contract, goal handles, feedback timer,
+and results. `DockingInterface` owns the ROS-independent operation and protocol
+handling; there is no separate docking action interface header. `DriverInterface`
+attaches it to the existing drive connection and calls its polling/submission
+cycle from the network owner. ROS callbacks only reserve, begin, or cancel an
+operation; they never send robot packets directly.
+
+Read-only discovery on 2026-10-27 confirmed `undock` takes no arguments and
+`dockInfo` returns state (0 Undocked, 1 Docking, 2 Docked, 3 Undocking), a forced
+docking flag, and a 16-bit shutdown countdown. The live read reported Docked,
+not forced, and countdown zero. The first live attempt failed as recorded below. The conflicting
+state description in `dockInfoChanged` is not used.
+
+- `docking.contact_dock_confirmed`: default `false`. Operator attestation that
+	no manually attached charging cable is present. Required to enable ordinary
+	velocity from Undocked feedback after startup. The four-byte protocol cannot
+	establish cable absence; do not infer it from docking state.
+- `docking.undock_timeout_sec`: default `30.0`, positive finite steady-clock
+	maximum deadline. A goal's `max_undocking_time` must be positive and finite;
+	the smaller of the goal duration and this configured limit is enforced.
+	This is a policy default, not a firmware-certified duration.
+- `docking.exclusive_control_confirmed`: default `false`. Operator attestation
+	that other motion sources are inactive; required separately from the action
+	goal. This is not automatic command-source arbitration or a protective interlock.
+- `docking.dock_type`: default `omron`. A goal may leave `dock_type` empty for
+	this sole firmware adapter, or specify the configured type. Other types are rejected.
+
+An undock goal requires both `docking.contact_dock_confirmed` and
+`docking.exclusive_control_confirmed` to be true, unforced Docked feedback, no shutdown
+countdown, confirmed drive mode, and at least 500 ms of fresh zero-velocity
+telemetry. Operator confirmation is not automatic arbitration of other clients.
+Only one goal can reserve the interface. Network preflight checks repeat before
+the single request. Submission alone is not success: fresh Undocked status and
+settled post-request zero-velocity telemetry are required. No retry is made.
+The Jazzy action feedback is empty. Success returns `success: true` and error
+code `NONE`; failed or canceled operations return `success: false`,
+`FAILED_TO_CONTROL`, and an explanatory `error_msg`. Invalid or unsafe goals
+are rejected without sending a firmware undock request. Independent read-back
+and physical operator observation remain separate acceptance evidence.
+
+This is standard Nav2 action API compatibility backed by the robot's firmware,
+not an instance of the Nav2 docking server or its velocity controller. Do not
+run both servers at the same resolved action name or let another docking
+controller command motion concurrently. The custom `amr_msgs/Undock` contract
+has been removed; there is no legacy endpoint or message compatibility shim.
+
+Cancellation suppresses a pending departure, latches velocity inhibition, and
+queues `stop`. Its result distinguishes observed stationary feedback from an
+unconfirmed stop. Firmware cancellation semantics and physical stopping remain
+unverified; cancellation is not a protective stop. Failure, feedback loss, or
+deadline expiry also inhibits control. Recovery requires operator review rather
+than automatic rearming. Without supported services or cable attestation, the
+default driver remains inhibited. Never bypass it with synthetic feedback.
+
+The feedback timeout is one second. `withReadiness()` serializes short,
+nonblocking velocity admission/submission with feedback updates; its callback
+must not reenter the interface. This software gate cannot recall already queued
+or transmitted packets and is not an independent protective stop.
+
+**Live undocking checkpoint, 2026-10-27 06:15:29 UTC:** one operator-authorized
+goal was attempted with contact docking/no cable, clear path, accessible E-stop,
+and other motion sources inactive confirmed. The action timed out and returned
+ABORTED / `FAILED_TO_CONTROL` (905): stop requested but not confirmed. Independent
+read-back and a subsequent final check reported state 3 (Undocking), not forced,
+no shutdown countdown, unchanged pose (1732, -1145 mm; -95 degrees), and zero
+reported velocities. The operator confirmed the robot stayed on the dock and
+was safely stopped. This is a FAILED/UNCERTAIN maneuver, not successful departure
+or verified firmware cancellation. Do not retry until the active docking state
+and motion inhibition are diagnosed and cleared through supported procedures.
+
+The audit is `build/amr_core/undocking/undock-once-20261027T061529Z.json` in the
+workspace. The test core process exited; no background controller remains.
+Startup requested the intentionally configured unsafe drive: live read-back
+changed from `SAFE_DRIVE 1` before the test to `SAFE_DRIVE 0` afterward. No mode
+restoration was attempted. Calibration settings were not changed. The test
+uses a private, namespaced YAML copy so the isolated node loads the correct
+connection parameters without putting credentials in command arguments.
+
 The driver subscribes to `geometry_msgs/msg/Twist` using reliable, depth-one
 history. Only `linear.x` and `angular.z` are supported. Non-finite fields or
 unsupported components larger than `1e-6` are rejected without refreshing command
@@ -246,11 +337,50 @@ get fresh operator approval for any restoration, dead-zone reduction, or motion
 test. Do not repeat the completed 10-to-14 write automatically. Remaining gates
 include firmware inheritance/control semantics, watchdogs, ownership, protective
 functions, physical drift/tracking, and exact restoration of property state.
-The [hardware calibration procedure](../amr_core/test/hardware/README.md) records
-the commands, audit artifacts, 14 passing offline C++ tests, and 25 passing
-offline Python safeguards. Raw captures may contain credentials and stay private.
+The [hardware calibration procedure](../amr_core/test/README.md) records
+the commands and audit artifacts. The native workflow now passes 23 offline
+C++ configuration/workflow tests and 38 offline Python regression cases. Raw captures may
+contain credentials and stay private.
+
+Configuration and calibration operations are now production headers under
+`amr_core/include/amr_core`: a configuration interface for allowlisted reads and
+the validated translation write, a protocol utility, and a header-only guarded
+calibration utility. A header-only client workflow is called directly by a thin
+C++ `main()`; Python is used only for tests. The standalone workflow is native C++:
+yaml-cpp loads settings, isolated bounded workers perform network operations,
+and exclusive fsynced JSON reports preserve audit evidence. No production Python
+script or GTest invocation remains. The workflow, low-level writer adapter,
+and separate read-only probe build and
+install with `BUILD_TESTING=OFF`; `ros2 run amr_core amr_deadzone_calibration
+--help` describes the workflow without connecting. The refactor adds no ROS
+node, automatic configuration writes, or unrestricted setter, and changes no
+robot settings. Operator writes still require the calibration guards and fresh
+approval, not just a successful low-level receipt.
+
+Configuration retrieval now requires `getConfigValues`; older SDK configuration
+services and their separate parameter allowlist have been removed. Shared
+telemetry decoding and maintenance connection/session helpers live in utility
+headers, while consumer-specific stationary and observation acceptance remain
+separate. This cleanup does not change `ratio_mapping: legacy` or enable a
+calibrated motion profile. All 69 offline driver tests pass with the shared decoder.
 
 ### Calibration Capture and Acceptance
+
+**2026-10-27 charging checkpoint:** the operator reported a depleted battery,
+connected charging, and powered the robot on. A complete read-only snapshot at
+00:46:40Z confirmed translation/rotation dead zones of **14% / 5%** again;
+the original 10% / 5% settings have not been restored. Evidence is in
+`build/amr_core/calibration/charging-readback-20261027T004640Z.json`.
+Charging status was not independently measured. No configuration writes or
+motion commands were sent. Before the production refactor, offline builds
+passed, and registered core/Nav2
+results were 118 passed plus one intentionally disabled live-write case skipped.
+
+All dead-zone changes and physical trials are on hold while charging. After
+normal disconnection from charging, refresh the read-only snapshot and obtain
+fresh operator readiness/approval before restoring/lowering settings or starting
+movement-related tests. Nothing is queued to run automatically; the 5%/3%/1%
+trials and physical/safety acceptance remain pending.
 
 1. Keep the ROS driver stopped and motion inhibited under the site's procedure.
 	Use vendor-supported read-only configuration export tooling with an operator

@@ -17,11 +17,14 @@
   <test_depend>nav2_velocity_smoother</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>python3-yaml</test_depend>
-  <test_depend>nlohmann_json</test_depend>
+  <depend>yaml_cpp_vendor</depend>
+  <depend>yaml-cpp</depend>
+  <depend>nlohmann_json</depend>
 
   <depend>rclcpp</depend>
   <depend>rclcpp_action</depend>
   <depend>amr_msgs</depend>
+  <depend>nav2_msgs</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>

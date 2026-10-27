@@ -1,5 +1,8 @@
 #pragma once
 
+#include "amr_core/utils/drive_telemetry.hpp"
+#include "amr_core/interfaces/docking_interface.hpp"
+
 #include <ArNetworking/ArNetworking.h>
 
 #include <string>
@@ -37,11 +40,18 @@ public:
    * @brief Constructor. Initializes publishers, subscribers, and libaria callbacks.
    * @param node Shared pointer to rclcpp::Node.
    */
-  DriverInterface(rclcpp::Node::SharedPtr node)
-    : node_(std::move(node)), update_callback_(this, &DriverInterface::handleUpdateNumbers),
+  DriverInterface(rclcpp::Node::SharedPtr node,
+                  std::shared_ptr<amr_core::DockingInterface> docking = {})
+    : node_(std::move(node)), docking_(std::move(docking)),
+      update_callback_(this, &DriverInterface::handleUpdateNumbers),
       drive_callback_(this, &DriverInterface::handleDriveCycle),
       mode_callback_(this, &DriverInterface::handleDriveMode)
   {
+    if (!docking_)
+    {
+      manage_docking_ = true;
+      docking_ = std::make_shared<amr_core::DockingInterface>();
+    }
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
   }
 
@@ -60,8 +70,12 @@ public:
     {
       client_.requestOnce("stop");
     }
+    if (manage_docking_) docking_->detach();
     client_.disconnect();
+    docking_.reset();
   }
+
+  std::shared_ptr<amr_core::DockingInterface> dockingInterface() const { return docking_; }
 
   /**
    * @brief Initializes parameters, publishers, and subscribers.
@@ -152,11 +166,21 @@ public:
       throw std::runtime_error("Robot must advertise ratioDrive and stop for velocity control");
     }
     configureHandlers();
+    if (manage_docking_)
+    {
+      docking_ = std::make_shared<amr_core::DockingInterface>(amr_core::DockingInterface::UndockRequest{}, 1.0,
+          getOrDeclareParameter<double>("docking.undock_timeout_sec", 30.0));
+      docking_->attach(client_, getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false));
+    }
     configureDriveMode();
     client_.addCycleCallback(&drive_callback_);
     cycle_registered_ = true;
     client_.runAsync();
     network_started_ = true;
+    if (docking_->readiness().state != amr_core::DockingInterface::State::Ready)
+    {
+      RCLCPP_WARN(node_->get_logger(), "Velocity inhibited until fresh docking readiness is verified");
+    }
   }
 
 private:
@@ -329,13 +353,13 @@ private:
       failDriveMode("Late drive-mode confirmation");
       return;
     }
-    if (packet->getDataLength() != packet->getDataReadLength() + 1)
+    std::uint8_t safe_mode = 0;
+    if (!amr_core::readSafeDrive(packet, safe_mode))
     {
       failDriveMode("Malformed drive-mode confirmation");
       return;
     }
-    const auto safe_mode = packet->bufToUByte();
-    if (!packet->isValid() || safe_mode > 1 || safe_mode != (unsafe_drive_ ? 0 : 1))
+    if (safe_mode != (unsafe_drive_ ? 0 : 1))
     {
       failDriveMode("Robot drive mode does not match the requested mode");
       return;
@@ -350,38 +374,23 @@ private:
    */
   void handleUpdateNumbers(ArNetPacket* packet)
   {
-    if (packet == nullptr || !packet->isValid() || packet->getDataLength() < packet->getDataReadLength() + 19)
+    amr_core::DriveTelemetry telemetry;
+    if (!amr_core::readDriveTelemetry(packet, telemetry))
     {
       body_feedback_.valid = false;
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                            "Rejected truncated or invalid updateNumbers packet; speed feedback invalidated");
       return;
     }
-    // The packet structure is assumed to be:
-    // byte: update type (ignored)
-    // byte4: x in mm
-    // byte4: y in mm
-    // byte2: theta in degrees
-    // byte2: x velocity in mm/s
-    // byte2: theta velocity in deg/s
-    // byte2: y velocity in mm/s
-
-    packet->bufToByte2();
-    const double x = static_cast<double>(packet->bufToByte4()) / 1000.0;
-    const double y = static_cast<double>(packet->bufToByte4()) / 1000.0;
-    const double theta_deg = static_cast<double>(packet->bufToByte2());
-    const double x_vel_mps = static_cast<double>(packet->bufToByte2()) / 1000.0;
-    const double theta_vel_rad_s = static_cast<double>(packet->bufToByte2()) * M_PI / 180.0;
-    const double y_vel_mps = static_cast<double>(packet->bufToByte2()) / 1000.0;
-    packet->bufToByte();
-
-    if (!packet->isValid())
-    {
-      body_feedback_.valid = false;
-      return;
-    }
+    const double x = static_cast<double>(telemetry.x_mm) / 1000.0;
+    const double y = static_cast<double>(telemetry.y_mm) / 1000.0;
+    const double theta_deg = static_cast<double>(telemetry.heading_deg);
+    const double x_vel_mps = static_cast<double>(telemetry.forward_mm_s) / 1000.0;
+    const double theta_vel_rad_s = static_cast<double>(telemetry.angular_deg_s) * M_PI / 180.0;
+    const double y_vel_mps = static_cast<double>(telemetry.lateral_mm_s) / 1000.0;
     body_feedback_ = { x_vel_mps, 0.0, true };
     body_feedback_received_ = amr_core::DriveCommandPolicy::Clock::now();
+    if (manage_docking_) docking_->observe(telemetry);
 
     // Update internal pose state within a mutex to ensure thread safety with the ROS callbacks that may access the pose.
     {
@@ -457,6 +466,7 @@ private:
    */
   void stopCB(const std_msgs::msg::Empty& /*msg*/)
   {
+    if (manage_docking_) docking_->cancelUndock();
     command_policy_->requestStop();
     RCLCPP_INFO(node_->get_logger(), "Explicit drive stop requested");
   }
@@ -485,11 +495,23 @@ private:
       return;
     }
 
-    if (!command_policy_->accept({ msg.linear.x, msg.angular.z }, amr_core::DriveCommandPolicy::Clock::now()))
-    {
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
-                           "Ignored cmd_vel while a stop request is awaiting local submission; send fresh input afterward");
-    }
+    docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
+      if (readiness.state != amr_core::DockingInterface::State::Ready)
+      {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+                             "Ignored cmd_vel: docking readiness is not verified; request undocking explicitly");
+        return;
+      }
+      if (command_policy_->accept({ msg.linear.x, msg.angular.z }, amr_core::DriveCommandPolicy::Clock::now()))
+      {
+        command_generation_ = readiness.generation;
+      }
+      else
+      {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+                             "Ignored cmd_vel while a stop request is awaiting local submission; send fresh input afterward");
+      }
+    });
   }
 
   void handleDriveCycle()
@@ -497,6 +519,7 @@ private:
     if (!client_.isConnected())
     {
       failDriveMode("Drive connection lost");
+      if (manage_docking_) docking_->cycle(false);
       return;
     }
 
@@ -513,7 +536,23 @@ private:
         requestDriveMode(now);
       }
     }
+    if (manage_docking_) docking_->cycle(mode_confirmed_.load());
+    docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
+      handleDriveCommands(now, readiness);
+    });
+  }
+
+  void handleDriveCommands(amr_core::DriveCommandPolicy::TimePoint now,
+                           amr_core::DockingInterface::Readiness readiness)
+  {
     const auto decision = command_policy_->poll(now);
+    if (decision.action == amr_core::DriveCommandPolicy::Action::Drive &&
+        (readiness.state != amr_core::DockingInterface::State::Ready ||
+         command_generation_ != readiness.generation))
+    {
+      command_policy_->requestStop();
+      return;
+    }
     if (decision.action == amr_core::DriveCommandPolicy::Action::Stop)
     {
       const bool queued = client_.requestOnce("stop", nullptr, true);
@@ -581,6 +620,9 @@ private:
 
   // ROS node and libaria client
   rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<amr_core::DockingInterface> docking_;
+  bool manage_docking_{ false };
+  unsigned long long command_generation_{ 0 };
 
   // Libaria runtime manager to ensure proper initialization and shutdown of libaria
   amr_core::LibAriaRuntime aria_runtime_;

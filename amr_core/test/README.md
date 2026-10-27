@@ -11,9 +11,156 @@ Those cases are registered with `colcon test`.
 The robot-free `test_hybrid_config` target checks request bytes, bounded chunk
 reassembly, malformed records, source slots, and captured subnormal doubles.
 
+## Offline Docking Foundation
+
+The header-only docking state machine and localhost driver gating tests are
+registered in `test_drive_interface`. They verify explicit-only departure,
+fresh-feedback readiness, cable/unknown inhibition, one-attempt submission,
+failure/timeout latching, default startup inhibition, and no stale-command replay.
+The injected test backend never contacts the robot. Transport loopback tests also
+verify confirmed reservation, settled departure, and cancellation before begin
+without sending an undock request. See the
+[docking readiness gate](../../docs/parameters.md#docking-readiness-gate)
+for the protocol adapter and CoreNode-owned ROS action. The first supervised
+hardware attempt on 2026-10-27 failed: the robot stayed on the dock, the action
+timed out, and firmware state remained Undocking despite zero reported velocity.
+Physical departure and firmware cancellation are not accepted. The production driver remains inhibited
+without fresh docking readiness and operator cable attestation.
+
+The real-core localhost action test uses `nav2_msgs/action/UndockRobot` at
+`undock_robot`. It covers false-by-default authorization, dock-type and timeout
+validation, standard success/error results, and enforcement of a short goal
+deadline. ROS action ownership remains in CoreNode, not the docking header.
+The separate `test_undocking.py` movement test requires both `--robot` and
+`--undock-once`; never enable these flags for offline validation. Its audit
+uses the standard result fields and independent post-test status/telemetry.
+
+## Production Configuration and Calibration
+
+Functional operations no longer live in the test tree or execute through GTest:
+
+- [configuration_protocol.hpp](../include/amr_core/utils/configuration_protocol.hpp)
+   owns the allowlisted protocol encoding, decoding, and bounded chunk assembly.
+- [drive_telemetry.hpp](../include/amr_core/utils/drive_telemetry.hpp)
+   owns checked `updateNumbers` and safe-drive reply decoding. Driver, status,
+   probe, and calibration consumers share it but retain their own policies.
+- [robot_session.hpp](../include/amr_core/utils/robot_session.hpp)
+   owns maintenance connection validation, protocol enforcement, transport
+   defaults, and exception-safe client lifetime through the shared SDK runtime.
+- [configuration_interface.hpp](../include/amr_core/interfaces/configuration_interface.hpp)
+   provides `amr_core::ConfigurationInterface`, constructed with a caller-owned,
+   connected `DriveClient`. `getValues()` returns the allowlisted drive snapshot;
+   `setTranslationDeadzone(expected, target)` performs only the validated numeric
+   translation write and receipt check. There is no unrestricted setter.
+- [deadzone_calibration.hpp](../include/amr_core/utils/deadzone_calibration.hpp)
+   retains header-only calibration policy: stationary preflight, expected values,
+   complete before/pre-write/after comparisons, and at most one write attempt.
+   Operator workflows must use this guarded layer, not the low-level setter alone.
+- [deadzone_calibration_client.hpp](../include/amr_core/utils/deadzone_calibration_client.hpp)
+   implements CLI validation, YAML loading, bounded network workers, and durable
+   audit reporting. The C++ entry point only calls `runCalibrationClient()`.
+
+The caller must serialize access to the client and keep it alive throughout each
+operation. These synchronous operations pump its network loop; do not invoke
+them concurrently with another owner. The low-level setter does not establish
+stationarity, command-source exclusivity, atomic compare-and-set semantics, or
+effective application from a receipt alone. Read-back remains mandatory.
+
+The native C++ `amr_deadzone_calibration` workflow loads connection settings
+with yaml-cpp, calls the header-only calibration operations directly, and owns
+exclusive audit files and independent read-back. There is no Python production
+workflow or executable chaining. `amr_hardware_probe` remains a separate read-only
+production executable; `amr_deadzone_writer` remains a low-level stdin adapter.
+All three install without `BUILD_TESTING`; no new ROS node or driver-startup
+configuration write was added. Header dependencies are installed and exported.
+
+```bash
+colcon build --packages-select amr_core --cmake-args -DBUILD_TESTING=OFF
+source install/setup.bash
+ros2 run amr_core amr_deadzone_calibration --help
+```
+
+The workflow uses the installed `amr_ros` configuration by default. Use `--params`
+for an explicit file, including when invoking the build executable directly.
+The former Python-only `--probe`, `--writer`, and `--test-binary` options are no
+longer accepted. Help opens no robot connection. Credentials are loaded from
+the YAML file and never placed in argv or reports.
+
+Each network operation runs in an isolated child process: read/observe workers
+have a 15-second deadline and the single write worker has a 45-second deadline.
+Timed-out/interrupted workers are terminated and reaped. The write is never
+retried; a new read-only connection attempts independent read-back even after
+an uncertain failure. Audit files use exclusive creation, owner-only permissions,
+and fsync, with a pending record saved before any network access. SIGINT/SIGTERM
+marks the operation unsuccessful; read-back and final audit still run where
+possible. Forced process termination or audit-storage failure can leave an
+unfinished artifact: never interpret it as proof no write occurred.
+
+Native workflow validation passed 23 C++ configuration/workflow tests and 38
+Python regression cases. Python remains test tooling only; the executable tests
+use localhost, never the physical robot. The former disabled live-write GTest
+was removed; these results are not live configuration or physical-motion acceptance.
+All 69 driver tests also pass with the shared telemetry decoder. Legacy
+configuration-service fallback has been removed; the distinct uncalibrated
+`ratio_mapping: legacy` motion setting is unchanged, not enabled calibration.
+
+## Charging Checkpoint: 2026-10-27
+
+The operator reported that the battery had depleted, connected charging, and
+powered the robot on. No motion trials or dead-zone changes are to run while
+the robot is charging. Charging/battery state is operator-reported, not measured
+or independently certified by this configuration check.
+
+At 00:46:40Z, a complete read-only `getConfigValues` snapshot again confirmed
+**translation dead zone 14% / rotation dead zone 5%**, matching the last handoff.
+Artifact: `build/amr_core/calibration/charging-readback-20261027T004640Z.json`.
+The initial connection attempt timed out before the operator powered the robot
+on; the explicitly requested retry passed. No settings, mode, or motion commands
+were sent, and the original 10% / 5% settings remain unrestored.
+
+Before the production refactor, offline rebuilds of `amr_core`, `amr_nav2`, and
+`amr_ros` passed. Registered
+results were 107 core cases (zero failures, one disabled live-write case skipped)
+and 12 Nav2 cases (zero failures): 118 passed, one skipped. The skip is intentional
+and does not count as configuration-write or physical-motion acceptance.
+
+When charging is complete and the robot is disconnected using the site's normal
+procedure, obtain fresh operator readiness/approval and read back settings again
+before any trial. The first lower setting must be approved explicitly; the
+proposed 5%, 3%, 1% trials remain pending. Announce movement-related testing before
+starting it. No writes, restorations, motion trials, or restarts are queued to
+run automatically. Calibration remains disabled and the firmware/safety gates
+below remain open.
+
+### Offline Candidate Trial Envelope
+
+While charging, candidate mapping tests cover the current 14% setting and the
+proposed 5%, 3%, and 1% translation trials using the SDK's real in-memory packet
+serializer. No robot connection or configuration write is involved. At 100%
+throttle with the still-unconfirmed 1000/250 mm/s forward/reverse ratio gains:
+
+| Translation Dead Zone | Forward Boundary Magnitude | Reverse Boundary Magnitude |
+| --- | --- | --- |
+| 14% (last verified setting) | 140 mm/s | 35 mm/s |
+| 5% (pending trial) | 50 mm/s | 12.5 mm/s |
+| 3% (pending trial) | 30 mm/s | 7.5 mm/s |
+| 1% (pending trial) | 10 mm/s | 2.5 mm/s |
+
+Nonzero translation targets exactly on these boundaries are rejected. Targets
+just above them can also be rejected when six-significant-digit wire formatting
+rounds their ratios back onto a boundary. Tests verify both directions, rejection
+without boosting, and acceptance above the rounded boundary. Rotation stays at
+5%; under the stopped-turn candidate gain of 50 degrees/s, its boundary remains
+2.5 degrees/s in either direction, with equality accepted by the modeled rule.
+
+These are model boundaries, not measured minimum velocities or automatically
+applied settings. A no-input creep observation is separate from commanded
+low-speed tracking. Passing offline tests proves neither the installed firmware
+contract nor safe motion. No physical trial or dead-zone reduction has occurred.
+
 ## Session Handoff: 2026-10-26
 
-Work is paused. The last verified live settings are **translation dead zone 14%
+At the end of that session, work was paused at **translation dead zone 14%
 and rotation dead zone 5%**; the original 10% / 5% settings have not been restored.
 Do not assume that the historical exports or baseline examples describe the
 current robot. This higher translation dead zone is a persistence experiment,
@@ -91,16 +238,15 @@ not source control. Authentication has a 15-second process deadline; TCP has a
 The config category also saves a sanitized snapshot to
 `build/amr_core/hardware-config.json`; override it with `--robot-capture`.
 It includes a UTC timestamp, endpoint/protocol, probe result, canonical snapshot
-SHA-256, allowlisted numeric drive settings, and relevant advertised service
-descriptions. Discovery records may name write commands; these are never invoked.
-Full configuration values and credentials are not written to the snapshot.
+SHA-256 and allowlisted numeric drive settings. Full configuration values and
+credentials are not written to the snapshot.
 
-The probe uses `ArClientHandlerConfig::requestConfigFromServer()` only when a
-supported `getConfig` / `getConfigBySections*` service is advertised. Otherwise,
-when `getConfigValues` is advertised, it uses the local `aram_hybrid_v8` reader
-described below. It never calls configuration save, defaults, reload, set, or
-update APIs. Legacy transfers have an eight-second deadline; hybrid reads have
-a four-second deadline per section, within the 15-second process deadline. A completed
+The probe exclusively uses `getConfigValues` through `ConfigurationInterface`
+and the local `aram_hybrid_v8` reader described below. Older `getConfig` and
+`getConfigBySections*` services are unsupported, even if advertised. Missing
+modern service support produces an incomplete capture, not a fallback. The
+probe never calls configuration save, defaults, reload, set, or update APIs.
+Reads have a four-second deadline per section, within the 15-second process deadline. A completed
 transfer is not proof that all effective/inherited settings were supplied.
 Missing settings and unresolved zero sentinels must not be replaced with archived
 defaults. Firmware identity and configuration semantics need independent evidence.
@@ -199,8 +345,10 @@ remain gates. `unsafe_drive: true`, `ratio_mapping: legacy`, and
 
 ## Dead-Zone Calibration Observer
 
-Reusable tooling lives in `amr_core/calibration/deadzones.py`. It uses the local
-probe's read-only `observe` mode by default, not the ROS driver. Observation
+Reusable tooling is the native C++ `amr_deadzone_calibration` executable.
+[deadzones.cpp](../src/deadzones.cpp) is a thin `main()` calling the client
+header directly. It observes directly
+through a local `DriveClient` by default, not the ROS driver. Observation
 sends no motion, stop, safe-drive, or configuration-write commands. It requires explicit `--robot`,
 checks both dead zones before and after a ten-second observation, and saves
 every received numeric odometry sample in a new JSON artifact. Observation
@@ -211,7 +359,7 @@ command sources inactive, a read-only observation of the last verified settings 
 
 ```bash
 source install/setup.bash
-python3 src/omron_amr/amr_core/calibration/deadzones.py --robot \
+ros2 run amr_core amr_deadzone_calibration --robot \
    --expected-translation 14 --expected-rotation 5 \
    --output build/amr_core/calibration/observation-14-5.json
 ```
@@ -235,17 +383,20 @@ the ratio mapping. Do not enable calibration from these trials alone.
 
 ### Explicit Configuration Writes
 
-The C++ writer is header-only in `amr_core/calibration/deadzone_write.hpp`;
-there is no standalone writer executable. Its
+The calibration implementation is header-only in
+[deadzone_calibration.hpp](../include/amr_core/utils/deadzone_calibration.hpp).
+Its
 `changeTranslationDeadzone` overload accepts an already-connected local
 `DriveClient`, checks stationary telemetry and complete configuration snapshots,
 and attempts at most one numeric translation-dead-zone write. It sends no
-property, rotation, motion, mode, save, reload, or restart commands. The Python
-wrapper invokes an explicitly disabled live adapter in the existing GTest
-binary; normal `colcon test` and read-only pytest runs cannot enable that adapter.
-Even if selected with `--gtest_also_run_disabled_tests`, it skips before connecting
-unless `AMR_APPLY_TRANSLATION_DEADZONE=CONFIRMED` is present and stdin carries
-the separate confirmation line. Credentials remain on stdin, not argv or logs.
+property, rotation, motion, mode, save, reload, or restart commands. The C++
+workflow calls this guarded header directly, not GTest or the low-level writer
+adapter. It rejects requests before connecting unless `--robot`,
+`--apply-translation`, and `--confirm-write` are supplied with valid distinct
+integer percentages. The separate low-level `amr_deadzone_writer` still requires
+its command options, environment approval, and stdin token; the workflow no
+longer invokes it. Normal tests cannot perform a live write. Credentials remain
+in the settings file or low-level adapter stdin, not argv or logs.
 
 The following is the historical command for the completed operator-approved
 translation-only change. Do not rerun it: the current translation value is 14,
@@ -253,13 +404,13 @@ not the expected starting value of 10. New writes require fresh approval,
 stationary robot, inactive other command sources, and accessible E-stop.
 
 ```bash
-python3 src/omron_amr/amr_core/calibration/deadzones.py --robot \
+ros2 run amr_core amr_deadzone_calibration --robot \
    --expected-translation 10 --expected-rotation 5 \
    --apply-translation 14 --confirm-write \
    --output build/amr_core/calibration/write-translation-10-to-14.json
 ```
 
-Both write options are mandatory together. The wrapper creates an exclusive
+Both write options are mandatory together. The workflow creates an exclusive
 audit file before invocation, allows one attempt only, and performs a separate
 `getConfigValues` read afterward. A timeout or failed receipt is an uncertain
 outcome, not proof that no write occurred. Do not retry blindly; inspect the

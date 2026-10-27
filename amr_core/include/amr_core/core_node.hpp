@@ -3,6 +3,11 @@
 #include <rclcpp/rclcpp.hpp>
 #include <memory>
 #include <string>
+#include <mutex>
+#include <cmath>
+#include <stdexcept>
+#include <nav2_msgs/action/undock_robot.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 
 #include "amr_core/interfaces/status_interface.hpp"
 #include "amr_core/interfaces/laser_interface.hpp"
@@ -72,6 +77,7 @@ public:
     {
       driver_ = std::make_shared<DriverInterface>(this->shared_from_this());
       driver_->initialize(host_, port_, user_, password_, protocol_);
+      initializeUndockAction();
     }
     catch (const std::exception& ex)
     {
@@ -83,6 +89,63 @@ public:
   }
 
 private:
+  using Undock = nav2_msgs::action::UndockRobot;
+  using UndockGoal = rclcpp_action::ServerGoalHandle<Undock>;
+
+  void initializeUndockAction()
+  {
+    docking_ = driver_->dockingInterface();
+    dock_type_ = getOrDeclareParameter<std::string>("docking.dock_type", "omron");
+    if (dock_type_.empty()) throw std::invalid_argument("docking.dock_type must not be empty");
+    getOrDeclareParameter<bool>("docking.exclusive_control_confirmed", false);
+    undock_server_ = rclcpp_action::create_server<Undock>(shared_from_this(), "undock_robot",
+      [this](const rclcpp_action::GoalUUID&, std::shared_ptr<const Undock::Goal> goal) {
+        std::lock_guard<std::mutex> lock(undock_mutex_);
+        if (undock_goal_ || (!goal->dock_type.empty() && goal->dock_type != dock_type_) ||
+          !std::isfinite(goal->max_undocking_time) || goal->max_undocking_time <= 0.0f ||
+          !docking_->reserveUndock(get_parameter("docking.contact_dock_confirmed").as_bool(),
+                      get_parameter("docking.exclusive_control_confirmed").as_bool(),
+                      goal->max_undocking_time))
+          return rclcpp_action::GoalResponse::REJECT;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+      },
+      [this](std::shared_ptr<UndockGoal> goal) {
+        std::lock_guard<std::mutex> lock(undock_mutex_);
+        if (goal != undock_goal_ || !docking_->cancelUndock()) return rclcpp_action::CancelResponse::REJECT;
+        undock_cancel_requested_ = true;
+        return rclcpp_action::CancelResponse::ACCEPT;
+      },
+      [this](std::shared_ptr<UndockGoal> goal) {
+        std::lock_guard<std::mutex> lock(undock_mutex_);
+        undock_goal_ = std::move(goal);
+        undock_cancel_requested_ = false;
+        docking_->beginUndock();
+      });
+    undock_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() { publishUndock(); });
+  }
+
+  void publishUndock()
+  {
+    std::lock_guard<std::mutex> lock(undock_mutex_);
+    if (!undock_goal_) return;
+    const auto status = docking_->operationStatus();
+    if (!status.terminal)
+    {
+      undock_goal_->publish_feedback(std::make_shared<Undock::Feedback>());
+      return;
+    }
+    if (undock_cancel_requested_ && !undock_goal_->is_canceling()) return;
+    auto result = std::make_shared<Undock::Result>();
+    result->success = status.success;
+    result->error_code = status.success ? Undock::Result::NONE : Undock::Result::FAILED_TO_CONTROL;
+    result->error_msg = status.success ? "" : status.message;
+    if (undock_goal_->is_canceling()) undock_goal_->canceled(result);
+    else if (status.success) undock_goal_->succeed(result);
+    else undock_goal_->abort(result);
+    undock_goal_.reset();
+    docking_->finishUndock();
+  }
+
   /**
    * @brief Helper function to get a parameter value or declare it with a default if it doesn't exist.
    * @tparam T Parameter type.
@@ -112,6 +175,13 @@ private:
 
   // DriverInterface
   std::shared_ptr<DriverInterface> driver_;
+  std::shared_ptr<amr_core::DockingInterface> docking_;
+  rclcpp_action::Server<Undock>::SharedPtr undock_server_;
+  rclcpp::TimerBase::SharedPtr undock_timer_;
+  std::shared_ptr<UndockGoal> undock_goal_;
+  std::mutex undock_mutex_;
+  bool undock_cancel_requested_{ false };
+  std::string dock_type_;
 
   // Parameters
   std::string host_;

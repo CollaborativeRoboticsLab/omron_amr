@@ -12,8 +12,45 @@
 #include <string>
 #include <vector>
 
-namespace amr_hardware
+namespace amr_core
 {
+inline std::vector<std::uint8_t> translationDeadzoneRequest(int expected, int target)
+{
+  if (expected < 1 || expected > 99 || target < 1 || target > 99 || expected == target)
+  {
+    throw std::invalid_argument("Dead-zone change requires distinct integer percentages in [1, 99]");
+  }
+  std::vector<std::uint8_t> body{ 1, 0, 0, 0, 1, 4, 1 };
+  for (const auto& field : { std::string("Robot Operation"), std::string("Teleop Settings"), std::string(),
+                             std::string("TransDeadZone") })
+  {
+    body.insert(body.end(), field.begin(), field.end());
+    body.push_back(0);
+  }
+  body.push_back('d');
+  for (const auto& field : { std::to_string(expected), std::to_string(target) })
+  {
+    body.insert(body.end(), field.begin(), field.end());
+    body.push_back(0);
+  }
+  std::vector<std::uint8_t> request{ 1, 0, 1, 0, 0, 0 };
+  for (int length_field = 0; length_field < 2; ++length_field)
+  {
+    const auto length = static_cast<std::uint64_t>(body.size());
+    for (unsigned shift = 0; shift < 64; shift += 8)
+    {
+      request.push_back(static_cast<std::uint8_t>(length >> shift));
+    }
+  }
+  request.insert(request.end(), body.begin(), body.end());
+  return request;
+}
+
+inline bool matchesSingleChangeReceipt(const std::vector<std::uint8_t>& payload)
+{
+  return payload == std::vector<std::uint8_t>{ 1, 0, 1, 0, 0, 0 };
+}
+
 inline std::vector<std::uint8_t> sectionRequest(const std::string& section)
 {
   if (section != "Robot config" && section != "Teleop Settings")

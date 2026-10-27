@@ -1,13 +1,17 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import socket
+import subprocess
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 
-HARDWARE = Path(__file__).resolve().parent / 'hardware'
+HARDWARE = Path(__file__).resolve().parent
 
 
 def load_module(name, filename):
@@ -19,7 +23,7 @@ def load_module(name, filename):
 
 @pytest.mark.parametrize('port', [7272, 0])
 def test_robot_settings_returns_valid_connection_and_driver_or_fails_closed(tmp_path, port):
-    fixtures = load_module('hardware_settings_fixtures', 'conftest.py')
+    fixtures = load_module('hardware_settings_fixtures', 'test_configuration.py')
     robot = {'ip': 'offline', 'port': port, 'user': 'test-user', 'password': 'test-only'}
     driver = {'min_linear_speed': -100, 'max_linear_speed': 1000, 'ratio_mapping': 'legacy'}
     parameters = tmp_path / 'parameters.yaml'
@@ -38,13 +42,13 @@ def test_robot_settings_returns_valid_connection_and_driver_or_fails_closed(tmp_
 
 @pytest.mark.parametrize('returncode', [0, 1])
 def test_capture_artifact_preserves_result_and_enforces_acceptance(tmp_path, returncode, pytestconfig):
-    fixtures = load_module('hardware_capture_fixtures', 'conftest.py')
+    fixtures = load_module('hardware_capture_fixtures', 'test_configuration.py')
     fixtures.pytest_configure(pytestconfig)
     checks = load_module('hardware_capture_checks', 'test_config.py')
     snapshot = {
         'schema_version': 1, 'read_only': True, 'complete': returncode == 0,
         'parameters': [{'section': 'Teleop', 'name': 'FullThrottleForwards', 'value': 1200}],
-        'config_service': 'getConfig', 'failure_reason': 'Unsupported configuration export',
+        'config_service': 'getConfigValues', 'failure_reason': 'Unsupported configuration export',
     }
     destination = tmp_path / 'capture.json'
     configuration = SimpleNamespace(getoption=lambda option: str(destination))
@@ -66,7 +70,7 @@ def test_capture_artifact_preserves_result_and_enforces_acceptance(tmp_path, ret
 
 @pytest.mark.parametrize('returncode', [0, 1])
 def test_config_authentication_gate_fails_closed(returncode):
-    fixtures = load_module('hardware_auth_fixtures', 'conftest.py')
+    fixtures = load_module('hardware_auth_fixtures', 'test_configuration.py')
     probe = lambda category: SimpleNamespace(returncode=returncode)
     if returncode == 0:
         assert fixtures.authenticated_robot.__wrapped__(probe) is probe
@@ -76,7 +80,7 @@ def test_config_authentication_gate_fails_closed(returncode):
 
 
 def test_readonly_probe_rejects_movement_before_subprocess(tmp_path, monkeypatch):
-    fixtures = load_module('hardware_readonly_fixtures', 'conftest.py')
+    fixtures = load_module('hardware_readonly_fixtures', 'test_configuration.py')
     executable = tmp_path / 'probe'
     executable.touch()
     configuration = SimpleNamespace(getoption=lambda option: str(executable))
@@ -106,7 +110,7 @@ def mapping_snapshot():
 
 
 def test_mapping_assessment_keeps_reverse_gain_separate_from_speed_limit():
-    fixtures = load_module('mapping_assessment_fixtures', 'conftest.py')
+    fixtures = load_module('mapping_assessment_fixtures', 'test_configuration.py')
     snapshot = mapping_snapshot()
     original = json.dumps(snapshot, sort_keys=True)
     assessment = fixtures.ratio_mapping_assessment(
@@ -125,7 +129,7 @@ def test_mapping_assessment_keeps_reverse_gain_separate_from_speed_limit():
 
 @pytest.mark.parametrize('invalid', [None, True, float('nan'), float('inf'), -1])
 def test_mapping_assessment_rejects_invalid_values_without_enabling_motion(invalid):
-    fixtures = load_module('invalid_mapping_assessment_fixtures', 'conftest.py')
+    fixtures = load_module('invalid_mapping_assessment_fixtures', 'test_configuration.py')
     snapshot = mapping_snapshot()
     snapshot['parameters'][0]['value'] = invalid
     assessment = fixtures.ratio_mapping_assessment(snapshot)
@@ -135,7 +139,7 @@ def test_mapping_assessment_rejects_invalid_values_without_enabling_motion(inval
 
 
 def test_mapping_assessment_does_not_use_failed_capture():
-    fixtures = load_module('failed_mapping_assessment_fixtures', 'conftest.py')
+    fixtures = load_module('failed_mapping_assessment_fixtures', 'test_configuration.py')
     snapshot = mapping_snapshot()
     snapshot['complete'] = False
     assessment = fixtures.ratio_mapping_assessment(snapshot)
@@ -143,124 +147,129 @@ def test_mapping_assessment_does_not_use_failed_capture():
     assert 'candidate_calibration' not in assessment
 
 
-def calibration_module():
-    path = HARDWARE.parents[1] / 'calibration/deadzones.py'
-    spec = importlib.util.spec_from_file_location('deadzone_calibration', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+@pytest.mark.parametrize('scenario', [
+    'no-options', 'no-environment', 'missing-input', 'bad-token', 'bad-target',
+    'same-target', 'bad-rotation', 'bad-port', 'bad-integer', 'carriage-return', 'nul',
+])
+def test_production_writer_rejects_unconfirmed_or_invalid_requests_before_connecting(scenario):
+    binary = Path(os.environ.get('AMR_DEADZONE_WRITER',
+                  Path(__file__).resolve().parents[4] / 'build/amr_core/amr_deadzone_writer'))
+    if not binary.is_file():
+        pytest.skip('Build amr_deadzone_writer to exercise its offline command gates.')
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        listener.setblocking(False)
+        fields = ['127.0.0.1', str(listener.getsockname()[1]), 'test-user', 'test-only-private-value',
+                  '6MTX', '10', '14', '5', 'APPLY_TRANSLATION_DEADZONE']
+        options = ['--apply-translation', '--confirm-write']
+        environment = dict(os.environ, AMR_APPLY_TRANSLATION_DEADZONE='CONFIRMED')
+        if scenario == 'no-options':
+            options = []
+        elif scenario == 'no-environment':
+            environment.pop('AMR_APPLY_TRANSLATION_DEADZONE')
+        elif scenario == 'missing-input':
+            fields = fields[:5]
+        else:
+            index, value = {
+                'bad-token': (8, 'UNCONFIRMED'), 'bad-target': (6, '0'),
+                'same-target': (6, '10'), 'bad-rotation': (7, '100'), 'bad-port': (1, '0'),
+                'bad-integer': (6, '14extra'), 'carriage-return': (0, '127.0.0.1\r'),
+                'nul': (0, '127.0.0.1\0'),
+            }[scenario]
+            fields[index] = value
+        result = subprocess.run([str(binary), *options], input='\n'.join(fields) + '\n',
+                                text=True, capture_output=True, timeout=3, env=environment)
+        assert result.returncode == 2
+        assert 'no connection opened' in result.stderr
+        assert 'test-only-private-value' not in result.stdout + result.stderr
+        with pytest.raises(BlockingIOError):
+            listener.accept()
 
 
-@pytest.mark.parametrize('scenario', ['success', 'failed', 'timeout', 'bad-result', 'wrong-readback'])
-def test_calibration_write_is_once_audited_and_independently_verified(tmp_path, monkeypatch, capsys, scenario):
-    calibration = calibration_module()
-    destination = tmp_path / 'write.json'
-    calls = []
-    secret = 'test-only-private-value'
-
-    def execute(command, **kwargs):
-        calls.append(command)
-        assert destination.is_file()
-        assert json.loads(destination.read_text())['state'] == 'pending'
-        assert secret not in ' '.join(command)
-        assert secret in kwargs['input']
-        assert kwargs['env']['AMR_APPLY_TRANSLATION_DEADZONE'] == 'CONFIRMED'
-        assert kwargs['input'].endswith('10\n14\n5\nAPPLY_TRANSLATION_DEADZONE\n')
-        if scenario == 'timeout':
-            raise calibration.subprocess.TimeoutExpired(command, 45)
-        evidence = {'complete': scenario != 'failed', 'write_attempted': True}
-        payload = 'invalid' if scenario == 'bad-result' else json.dumps(evidence)
-        return SimpleNamespace(returncode=1 if scenario == 'failed' else 0,
-                               stdout='CALIBRATION_RESULT ' + payload + '\n')
-
-    monkeypatch.setattr(calibration.subprocess, 'run', execute)
-    monkeypatch.setattr(calibration, 'capture', lambda *args: {
-        'TransDeadZone': 10 if scenario == 'wrong-readback' else 14, 'RotDeadZone': 5,
-    })
-    result = calibration.apply_translation(Path('offline-binary'), Path('offline-probe'),
-                                           'offline\n7272\nuser\n' + secret + '\n6MTX\n',
-                                           10, 14, 5, destination)
-    assert result == (0 if scenario == 'success' else 1)
-    assert len(calls) == 1
-    saved = destination.read_text()
-    report = json.loads(saved)
-    assert report['complete'] is (scenario == 'success')
-    assert report['ready_for_motion'] is False
-    assert report['persistence_verified'] is False
-    assert 'independent_readback' in report
-    assert secret not in saved + capsys.readouterr().out
+def calibration_binary():
+    binary = Path(os.environ.get('AMR_DEADZONE_CALIBRATION',
+                  Path(__file__).resolve().parents[4] / 'build/amr_core/amr_deadzone_calibration'))
+    if not binary.is_file():
+        pytest.skip('Build amr_deadzone_calibration to exercise its offline command gates.')
+    return binary
 
 
-def test_calibration_cli_rejects_unconfirmed_write_before_connection(tmp_path, monkeypatch):
-    calibration = calibration_module()
-    monkeypatch.setattr('sys.argv', ['deadzones.py', '--robot', '--expected-translation', '10',
-                                    '--expected-rotation', '5', '--apply-translation', '14',
-                                    '--output', str(tmp_path / 'unused.json')])
-    with pytest.raises(SystemExit) as error:
-        calibration.main()
-    assert error.value.code == 2
-    assert not (tmp_path / 'unused.json').exists()
-
-
-def test_deadzone_observer_detects_small_motion_without_claiming_no_creep():
-    calibration = calibration_module()
-    first = {'x_mm': 0, 'y_mm': 0, 'heading_deg': 179,
-             'forward_mm_s': 0, 'angular_deg_s': 0, 'lateral_mm_s': 0}
-    stationary = calibration.summarize([first, dict(first)])
-    assert stationary['motion_evidence'] is False
-    assert stationary['no_creep_proven'] is False
-    moved = dict(first, x_mm=1, heading_deg=-179, forward_mm_s=1)
-    summary = calibration.summarize([first, moved])
-    assert summary['motion_evidence'] is True
-    assert summary['max_position_change_mm'] == 1
-    assert summary['max_heading_change_deg'] == 2
-    assert summary['peak_reported_speeds']['forward_mm_s'] == 1
-
-
-def test_deadzone_observer_checks_complete_readback_and_rejects_writes():
-    calibration = calibration_module()
-    snapshot = mapping_snapshot()
-    assert calibration.deadzones(snapshot) == {'TransDeadZone': 10, 'RotDeadZone': 5}
-    snapshot['complete'] = False
-    with pytest.raises(ValueError, match='complete read-only'):
-        calibration.deadzones(snapshot)
-    with pytest.raises(ValueError, match='read-only'):
-        calibration.run_probe('/not-executed', 'setConfigValues', 'not-a-connection')
-    with pytest.raises(ValueError, match='Insufficient'):
-        calibration.summarize([])
-
-
-@pytest.mark.parametrize('mismatch', [None, 'before', 'after'])
-def test_deadzone_trial_checks_both_readbacks_and_saves_result(tmp_path, monkeypatch, capsys, mismatch):
-    calibration = calibration_module()
-    parameters = tmp_path / 'parameters.yaml'
-    parameters.write_text(calibration.yaml.safe_dump({'amr_core': {'ros__parameters': {'robot': {
-        'ip': 'offline', 'port': 7272, 'user': 'test-user', 'password': 'test-only-secret',
+def calibration_settings(path, port):
+    path.write_text(yaml.safe_dump({'amr_core': {'ros__parameters': {'robot': {
+        'ip': '127.0.0.1', 'port': port, 'user': 'test-user', 'password': 'test-only-private-value',
     }}}}))
-    destination = tmp_path / 'trial.json'
-    monkeypatch.setattr('sys.argv', ['deadzones.py', '--robot', '--params', str(parameters),
-                                    '--expected-translation', '5', '--expected-rotation', '5',
-                                    '--output', str(destination)])
-    calls = []
 
-    def capture(executable, connection):
-        stage = 'before' if not calls else 'after'
-        calls.append(stage)
-        return {'TransDeadZone': 3 if stage == mismatch else 5, 'RotDeadZone': 5}
 
-    def observe(executable, category, connection):
-        assert category == 'observe'
-        calls.append(category)
-        sample = {'x_mm': 0, 'y_mm': 0, 'heading_deg': 0,
-                  'forward_mm_s': 0, 'angular_deg_s': 0, 'lateral_mm_s': 0}
-        return ('ODOMETRY ' + json.dumps(sample) + '\n') * 2
+@pytest.mark.parametrize('scenario', [
+    'no-robot', 'unconfirmed-write', 'confirmation-without-target', 'same-target', 'fractional-write',
+    'invalid-rotation', 'nan', 'existing-output', 'duplicate-option', 'unknown-option', 'bad-settings',
+])
+def test_cpp_calibration_rejects_invalid_requests_before_connecting(tmp_path, scenario):
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        listener.setblocking(False)
+        parameters = tmp_path / 'settings.yaml'
+        calibration_settings(parameters, listener.getsockname()[1])
+        destination = tmp_path / 'report.json'
+        command = [str(calibration_binary()), '--robot', '--params', str(parameters),
+                   '--expected-translation', '14', '--expected-rotation', '5', '--output', str(destination)]
+        if scenario == 'no-robot':
+            command.remove('--robot')
+        elif scenario == 'unconfirmed-write':
+            command += ['--apply-translation', '5']
+        elif scenario == 'confirmation-without-target':
+            command += ['--confirm-write']
+        elif scenario in ('same-target', 'fractional-write'):
+            command += ['--apply-translation', '14' if scenario == 'same-target' else '3.5', '--confirm-write']
+        elif scenario in ('invalid-rotation', 'nan'):
+            command[command.index('--expected-rotation') + 1] = '100' if scenario == 'invalid-rotation' else 'nan'
+        elif scenario == 'existing-output':
+            destination.write_text('preserve-existing-report')
+        elif scenario == 'duplicate-option':
+            command += ['--robot']
+        elif scenario == 'unknown-option':
+            command += ['--writer', 'removed-option']
+        else:
+            parameters.write_text('robot: [invalid yaml')
+        result = subprocess.run(command, text=True, capture_output=True, timeout=3)
+        assert result.returncode == 2
+        assert 'no connection opened' in result.stderr
+        assert 'test-only-private-value' not in result.stdout + result.stderr
+        if scenario == 'existing-output':
+            assert destination.read_text() == 'preserve-existing-report'
+        else:
+            assert not destination.exists()
+        with pytest.raises(BlockingIOError):
+            listener.accept()
 
-    monkeypatch.setattr(calibration, 'capture', capture)
-    monkeypatch.setattr(calibration, 'run_probe', observe)
-    assert calibration.main() == (0 if mismatch is None else 1)
+
+@pytest.mark.parametrize('write', [False, True])
+def test_cpp_calibration_audits_connection_failure_without_leaking_credentials(tmp_path, write):
+    with socket.socket() as reserved:
+        reserved.bind(('127.0.0.1', 0))
+        parameters = tmp_path / 'settings.yaml'
+        calibration_settings(parameters, reserved.getsockname()[1])
+        destination = tmp_path / 'report.json'
+        command = [str(calibration_binary()), '--robot', '--params', str(parameters),
+                   '--expected-translation', '14', '--expected-rotation', '5', '--output', str(destination)]
+        if write:
+            command += ['--apply-translation', '5', '--confirm-write']
+        result = subprocess.run(command, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 1
     saved = destination.read_text()
     report = json.loads(saved)
-    assert report['complete'] is (mismatch is None)
+    assert report['complete'] is False
     assert report['ready_for_motion'] is False
-    assert 'test-only-secret' not in saved + capsys.readouterr().out
-    assert calls == (['before'] if mismatch == 'before' else ['before', 'observe', 'after'])
+    assert 'finished_at_utc' in report
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert 'test-only-private-value' not in saved + result.stdout + result.stderr
+    if write:
+        assert report['state'] == 'failed_or_uncertain'
+        assert report['write_attempted'] is None
+        assert report['persistence_verified'] is False
+        assert 'readback_failure' in report
+    else:
+        assert report['read_only'] is True
+        assert report['samples'] == []

@@ -11,7 +11,7 @@ import yaml
 
 
 HARDWARE = Path(__file__).resolve().parent
-PACKAGE = HARDWARE.parents[1]
+PACKAGE = HARDWARE.parent
 WORKSPACE = PACKAGE.parents[2]
 
 
@@ -114,6 +114,7 @@ def ratio_mapping_assessment(snapshot, driver=None):
 def pytest_addoption(parser):
     group = parser.getgroup('robot hardware')
     group.addoption('--robot', action='store_true', help='Allow explicit live robot connectivity/config tests.')
+    group.addoption('--undock-once', action='store_true', help='Authorize one supervised contact-dock departure; requires --robot.')
     group.addoption('--robot-params', default=str(PACKAGE.parent / 'amr_ros/config/ld250_parameters.yaml'))
     group.addoption('--robot-probe', default=str(WORKSPACE / 'build/amr_core/amr_hardware_probe'))
     group.addoption('--robot-capture', default=str(WORKSPACE / 'build/amr_core/hardware-config.json'))
@@ -124,7 +125,7 @@ def pytest_configure(config):
         ('hardware', 'Explicitly opted-in live robot checks; never part of default colcon tests'),
         ('connectivity', 'TCP reachability and ARNetworking authentication'),
         ('config', 'Read-only advertised services, drive mode, and stationary telemetry'),
-        ('movement', 'Supervised physical motion acceptance; not implemented yet'),
+        ('movement', 'Supervised physical motion acceptance with separate explicit authorization'),
     ):
         config.addinivalue_line('markers', f'{marker}: {description}')
 

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <ArNetworking/ArNetPacket.h>
 
 #include <limits>
 
@@ -44,6 +45,60 @@ TEST(DriveRatioMapping, CandidateCapturedEnvelopeKeepsReverseGainSeparateFromRob
   EXPECT_EQ(mapping.map(0.10, 0.0, 100.0, {}).error, MappingError::UnrepresentableTranslation);
   EXPECT_EQ(mapping.map(-0.026, 0.0, 100.0, {}).error, MappingError::None);
   EXPECT_EQ(mapping.map(0.101, 0.0, 100.0, {}).error, MappingError::None);
+}
+
+TEST(DriveRatioMapping, ProposedDeadzoneTrialsRespectDirectionalWireBoundaries)
+{
+  for (const auto dead_zone : { 14.0, 5.0, 3.0, 1.0 })
+  {
+    Mapping mapping({ 1000.0, 250.0, 50.0, 25.0, 25.0, dead_zone, 5.0, 0.2 });
+    EXPECT_EQ(mapping.map(0.0, 0.0, 100.0, {}).error, MappingError::None);
+    for (const auto signed_gain : { 1000.0, -250.0 })
+    {
+      SCOPED_TRACE(::testing::Message() << "dead_zone=" << dead_zone << " signed_gain=" << signed_gain);
+      const auto boundary = signed_gain * dead_zone / 100000.0;
+      for (const auto scale : { 0.5, 1.0, 1.00000001 })
+      {
+        const auto rejected = mapping.map(boundary * scale, 0.0, 100.0, {});
+        EXPECT_EQ(rejected.error, MappingError::UnrepresentableTranslation);
+        EXPECT_DOUBLE_EQ(rejected.translation_pct, 0.0);
+        EXPECT_DOUBLE_EQ(rejected.rotation_pct, 0.0);
+      }
+      const auto requested = boundary * 1.0001;
+      const auto accepted = mapping.map(requested, 0.0, 100.0, {});
+      ASSERT_EQ(accepted.error, MappingError::None);
+      ArNetPacket packet;
+      packet.doubleToBuf(accepted.translation_pct);
+      packet.finalizePacket();
+      packet.resetRead();
+      const auto wire_ratio = packet.bufToDouble();
+      EXPECT_GT(std::fabs(wire_ratio), dead_zone);
+      EXPECT_GT(wire_ratio * signed_gain, 0.0);
+      const auto reconstructed = wire_ratio / 100.0 * std::fabs(signed_gain) / 1000.0;
+      EXPECT_NEAR(reconstructed, requested, std::fabs(requested) * 1e-5);
+    }
+  }
+}
+
+TEST(DriveRatioMapping, ProposedTranslationTrialsLeaveRotationDeadzoneUnchanged)
+{
+  constexpr double radians_per_degree = 3.14159265358979323846 / 180.0;
+  for (const auto dead_zone : { 14.0, 5.0, 3.0, 1.0 })
+  {
+    Mapping mapping({ 1000.0, 250.0, 50.0, 25.0, 25.0, dead_zone, 5.0, 0.2 });
+    for (const auto direction : { -1.0, 1.0 })
+    {
+      const auto boundary = direction * 2.5 * radians_per_degree;
+      EXPECT_EQ(mapping.map(0.0, boundary * 0.9999, 100.0, {}).error, MappingError::UnrepresentableRotation);
+      const auto accepted = mapping.map(0.0, boundary, 100.0, {});
+      ASSERT_EQ(accepted.error, MappingError::None);
+      ArNetPacket packet;
+      packet.doubleToBuf(accepted.rotation_pct);
+      packet.finalizePacket();
+      packet.resetRead();
+      EXPECT_DOUBLE_EQ(packet.bufToDouble(), direction * 5.0);
+    }
+  }
 }
 
 TEST(DriveRatioMapping, ReverseTurningUsesForwardSpeedDenominator)
@@ -157,12 +212,13 @@ TEST(DriveRatioMapping, ReconstructsTargetsAcrossDirectionalThrottleAndSpeedGrid
           const auto scale = throttle_pct / 100.0;
           const auto translation_gain = linear >= 0.0 ? config.forward_mm_s : config.reverse_mm_s;
           const auto moving_gain = linear > 0.0 ? config.rotation_forward_deg_s : config.rotation_reverse_deg_s;
-          const auto rotation_gain = linear == 0.0 ? config.rotation_stopped_deg_s :
-              config.rotation_stopped_deg_s + (moving_gain - config.rotation_stopped_deg_s) *
-                  std::fabs(measured * 1000.0 / config.forward_mm_s);
+          const auto rotation_gain =
+              linear == 0.0 ? config.rotation_stopped_deg_s :
+                              config.rotation_stopped_deg_s + (moving_gain - config.rotation_stopped_deg_s) *
+                                                                  std::fabs(measured * 1000.0 / config.forward_mm_s);
           EXPECT_NEAR(result.translation_pct / 100.0 * translation_gain * scale / 1000.0, linear, 1e-12);
-          EXPECT_NEAR(result.rotation_pct / 100.0 * rotation_gain * scale * 3.14159265358979323846 / 180.0,
-                      angular, 1e-12);
+          EXPECT_NEAR(result.rotation_pct / 100.0 * rotation_gain * scale * 3.14159265358979323846 / 180.0, angular,
+                      1e-12);
         }
       }
     }

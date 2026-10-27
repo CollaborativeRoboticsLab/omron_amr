@@ -1,11 +1,11 @@
 #pragma once
 
 #include "amr_core/utils/drive_client.hpp"
-#include "hybrid_config.hpp"
+#include "amr_core/utils/configuration_protocol.hpp"
 
 #include <chrono>
 
-namespace amr_hardware
+namespace amr_core
 {
 class HybridObservation
 {
@@ -86,4 +86,67 @@ inline void captureHybridConfiguration(amr_core::DriveClient& client, nlohmann::
     snapshot["failure_reason"] = error.what();
   }
 }
+
+class ConfigurationInterface
+{
+public:
+  explicit ConfigurationInterface(DriveClient& client) : client_(client) {}
+
+  nlohmann::json getValues()
+  {
+    requireService("getConfigValues");
+    nlohmann::json snapshot{ { "read_only", true } };
+    captureHybridConfiguration(client_, snapshot);
+    return snapshot;
+  }
+
+  bool setTranslationDeadzone(int expected, int target)
+  {
+    const auto encoded = translationDeadzoneRequest(expected, target);
+    requireService("setConfigValues");
+    Receipt receipt;
+    ArFunctor1C<Receipt, ArNetPacket*> callback(&receipt, &Receipt::receive);
+    if (!client_.addHandler("setConfigValues", &callback))
+    {
+      return false;
+    }
+    ArNetPacket packet;
+    packet.dataToBuf(encoded.data(), static_cast<int>(encoded.size()));
+    const bool submitted = client_.requestOnce("setConfigValues", &packet);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (submitted && receipt.count == 0 && client_.isConnected() && !client_.hasTransportFailure() &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+      client_.loopOnce();
+    }
+    client_.remHandler("setConfigValues", &callback);
+    return submitted && receipt.count == 1 && receipt.matches && client_.isConnected() &&
+           !client_.hasTransportFailure();
+  }
+
+private:
+  class Receipt
+  {
+  public:
+    void receive(ArNetPacket* packet)
+    {
+      ++count;
+      const auto* begin = reinterpret_cast<const std::uint8_t*>(packet->getBuf()) + packet->getHeaderLength();
+      matches = matchesSingleChangeReceipt({ begin, begin + packet->getDataLength() });
+    }
+
+    int count = 0;
+    bool matches = false;
+  };
+
+  void requireService(const char* service) const
+  {
+    if (!client_.isConnected() || client_.hasTransportFailure() || !client_.dataExists(service))
+    {
+      throw std::runtime_error("A connected client with the named configuration service is required");
+    }
+  }
+
+  DriveClient& client_;
+};
 }
