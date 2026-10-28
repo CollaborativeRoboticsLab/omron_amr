@@ -18,6 +18,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include <tf2_ros/transform_broadcaster.h>
+#include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/empty.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -101,6 +102,7 @@ public:
     odom_topic_ = getOrDeclareParameter<std::string>("driver.odom_topic", "amr/odom");
     cmd_vel_topic_ = getOrDeclareParameter<std::string>("driver.cmd_vel_topic", "amr/cmd_vel");
     stop_topic_ = getOrDeclareParameter<std::string>("driver.stop_topic", "amr/stop");
+    drive_ready_topic_ = getOrDeclareParameter<std::string>("driver.drive_ready_topic", "amr/drive_ready");
     publish_odom_ = getOrDeclareParameter<bool>("driver.publish_odom", true);
     publish_robot_tf_ = getOrDeclareParameter<bool>("driver.publish_robot_tf", true);
 
@@ -147,6 +149,7 @@ public:
     client_.setTransportFailureHandler([this]() { failDriveMode("Drive TCP transport failed"); });
 
     // Publishers
+    drive_ready_pub_ = node_->create_publisher<std_msgs::msg::Bool>(drive_ready_topic_, 1);
     if (publish_odom_)
     {
       odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
@@ -539,6 +542,13 @@ private:
     if (manage_docking_) docking_->cycle(mode_confirmed_.load());
     docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
       handleDriveCommands(now, readiness);
+      if (now - last_ready_published_ >= std::chrono::milliseconds(50))
+      {
+        std_msgs::msg::Bool message;
+        message.data = mode_confirmed_.load() && readiness.state == amr_core::DockingInterface::State::Ready;
+        drive_ready_pub_->publish(message);
+        last_ready_published_ = now;
+      }
     });
   }
 
@@ -645,6 +655,7 @@ private:
   bool mode_query_pending_{ false };
   amr_core::DriveCommandPolicy::TimePoint last_mode_response_{};
   amr_core::DriveCommandPolicy::TimePoint last_mode_query_{};
+  amr_core::DriveCommandPolicy::TimePoint last_ready_published_{};
 
   // Parameters
   std::string host_;
@@ -656,6 +667,7 @@ private:
   std::string odom_topic_{ "amr/odom" };
   std::string cmd_vel_topic_{ "amr/cmd_vel" };
   std::string stop_topic_{ "amr/stop" };
+  std::string drive_ready_topic_{ "amr/drive_ready" };
   bool publish_odom_{ true };
   bool publish_robot_tf_{ true };
 
@@ -697,6 +709,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_sub_;
 
   // Publishers
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr drive_ready_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };

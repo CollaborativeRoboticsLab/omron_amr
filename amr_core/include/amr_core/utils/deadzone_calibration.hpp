@@ -221,6 +221,47 @@ void changeTranslationDeadzone(int expected, int target, int rotation, Read read
   report["complete"] = true;
 }
 
+template <typename Read, typename Stationary, typename Write>
+void changeTeleopSetting(const std::string& name, double expected, double target, int expected_other,
+                         Read read, Stationary stationary, Write write, nlohmann::json& report)
+{
+  std::vector<std::uint8_t> encoded;
+  if (name == "RotDeadZone")
+  {
+    if (!std::isfinite(expected) || !std::isfinite(target) || expected != std::trunc(expected) ||
+        target != std::trunc(target) || expected < 1 || expected > 99 || target < 1 || target > 99)
+      throw std::invalid_argument("Rotation dead-zone values must be integer percentages in [1, 99]");
+    encoded = amr_core::rotationDeadzoneRequest(static_cast<int>(expected), static_cast<int>(target));
+  }
+  else if (name == "Timeout")
+    encoded = amr_core::teleopTimeoutRequest(expected, target);
+  else
+    throw std::invalid_argument("Unsupported teleop setting");
+  if (expected_other < 1 || expected_other > 99)
+    throw std::invalid_argument("Expected unchanged dead-zone must be in [1, 99]");
+  const auto key = std::make_pair(std::string("Teleop Settings"), name);
+  const auto other_key = std::make_pair(std::string("Teleop Settings"),
+                                        name == "RotDeadZone" ? std::string("TransDeadZone") :
+                                                                std::string("RotDeadZone"));
+  report["before"] = read();
+  auto before = checkedConfiguration(report.at("before"));
+  if (before.at(key).at("value") != expected || before.at(other_key).at("value") != expected_other)
+    throw std::runtime_error("Expected values do not match read-back");
+  if (!stationary()) throw std::runtime_error("Stationary telemetry preflight failed");
+  report["pre_write"] = read();
+  if (checkedConfiguration(report.at("pre_write")) != before)
+    throw std::runtime_error("Configuration changed during preflight");
+  report["write_attempted"] = true;
+  report["receipt_matches"] = write(encoded);
+  report["after"] = read();
+  before.at(key)["value"] = target;
+  if (checkedConfiguration(report.at("after")) != before)
+    throw std::runtime_error("Post-write configuration differs from the single authorized value change");
+  if (!report.at("receipt_matches").get<bool>())
+    throw std::runtime_error("Write receipt did not match; independent read-back is required");
+  report["complete"] = true;
+}
+
 namespace detail
 {
 class StationaryObservation
@@ -294,5 +335,25 @@ inline void changeTranslationDeadzone(amr_core::DriveClient& client, int expecte
   changeTranslationDeadzone(expected, target, rotation, read,
       [&]() { return detail::stationary(client, report); },
       [&](const std::vector<std::uint8_t>&) { return configuration.setTranslationDeadzone(expected, target); }, report);
+}
+
+inline void changeTeleopSetting(amr_core::DriveClient& client, const std::string& name, double expected,
+                                double target, int expected_other, nlohmann::json& report)
+{
+  report = { { "complete", false }, { "write_attempted", false }, { "ready_for_motion", false },
+             { "parameter", name }, { "expected", expected }, { "target", target },
+             { "expected_unchanged_deadzone", expected_other }, { "properties_written", false },
+             { "persistence_verified", false } };
+  if (!client.isConnected() || client.hasTransportFailure() || !client.dataExists("getConfigValues") ||
+      !client.dataExists("setConfigValues"))
+    throw std::runtime_error("A connected client with named configuration services is required");
+  amr_core::ConfigurationInterface configuration(client);
+  changeTeleopSetting(name, expected, target, expected_other, [&]() { return configuration.getValues(); },
+      [&]() { return detail::stationary(client, report); },
+      [&](const std::vector<std::uint8_t>&) {
+        return name == "RotDeadZone" ? configuration.setRotationDeadzone(static_cast<int>(expected),
+                                                                        static_cast<int>(target)) :
+                                       configuration.setTeleopTimeout(expected, target);
+      }, report);
 }
 }

@@ -74,6 +74,7 @@ public:
     }
     submitted_ = stop_requested_ = stop_submitted_ = stop_queued_ = terminal_ = success_ = stopped_ = false;
     message_.clear();
+    failure_reason_.clear();
     operation_timeout_sec_ = std::min(max_undocking_time, undock_timeout_sec_);
     reserved_ = true;
     return true;
@@ -92,6 +93,7 @@ public:
     std::lock_guard<std::mutex> lock(operation_mutex_);
     if (!reserved_ || terminal_) return false;
     stop_requested_ = true;
+    if (failure_reason_.empty()) failure_reason_ = "Undocking canceled by caller";
     fail();
     return true;
   }
@@ -143,7 +145,9 @@ public:
       {
         fail();
         terminal_ = true;
-        message_ = "Docking connection unavailable; stop unconfirmed; operator intervention required";
+        if (failure_reason_.empty()) failure_reason_ = "Docking connection unavailable";
+        message_ = "Docking connection unavailable; stop unconfirmed; operator intervention required; " +
+             failureContext(now);
       }
       return;
     }
@@ -180,18 +184,28 @@ public:
         if (!requestUndock())
         {
           stop_requested_ = true;
-          message_ = "Undock submission failed; outcome uncertain";
+          failure_reason_ = "Undock submission failed; outcome uncertain";
         }
         else submitted_ = true;
       }
     }
-    if (reserved_ && submitted_ && !terminal_ &&
-        (!mode_ready || !client_->isConnected() || !infoFresh(now) ||
-         now - telemetry_received_ >= std::chrono::milliseconds(200) || readiness().state == State::Failed ||
-         std::chrono::duration<double>(now - operation_started_).count() >= operation_timeout_sec_))
+    if (reserved_ && submitted_ && !terminal_ && !stop_requested_)
     {
-      stop_requested_ = true;
-      fail();
+      if (std::chrono::duration<double>(now - operation_started_).count() >= operation_timeout_sec_)
+        failure_reason_ = "Undocking deadline exceeded";
+      else if (!mode_ready)
+        failure_reason_ = "Confirmed drive mode lost during undocking";
+      else if (!infoFresh(now))
+        failure_reason_ = "Docking feedback stale during undocking";
+      else if (now - telemetry_received_ >= std::chrono::milliseconds(200))
+        failure_reason_ = "Velocity telemetry stale during undocking";
+      else if (readiness().state == State::Failed)
+        failure_reason_ = "Docking readiness failed during undocking";
+      if (!failure_reason_.empty())
+      {
+        stop_requested_ = true;
+        fail();
+      }
     }
     if (stop_requested_ && !stop_submitted_)
     {
@@ -210,6 +224,7 @@ public:
         terminal_ = true;
         message_ = stopped_ ? "Departure interrupted; stationary feedback observed; control remains inhibited" :
                              "Stop requested but not confirmed; use operator protective controls; control remains inhibited";
+        message_ += "; " + failureContext(now);
       }
     }
     else if (reserved_ && submitted_ && !terminal_ && readiness().state == State::Ready)
@@ -302,6 +317,13 @@ public:
   }
 
 private:
+  std::string failureContext(TimePoint now) const
+  {
+    return failure_reason_ + "; last dockInfo state=" +
+           (have_info_ ? std::to_string(static_cast<unsigned int>(info_.state)) : "unknown") +
+           " (" + (infoFresh(now) ? "fresh" : "stale or unavailable") + ")";
+  }
+
   bool infoFresh(TimePoint now) const
   {
     return have_info_ && now - info_received_ < std::chrono::seconds(1);
@@ -330,8 +352,9 @@ private:
     {
       update(Feedback::Unknown);
     }
-    else if (info_.state == DockInfo::State::Undocked && contact_confirmed_ && stationary(now) &&
-             (!submitted_ || (now > operation_started_ && stationary_since_ >= operation_started_)))
+    else if (info_.state == DockInfo::State::Undocked && contact_confirmed_ &&
+         (readiness(now).state == State::Ready ||
+          (stationary(now) && (!submitted_ || (now > operation_started_ && stationary_since_ >= operation_started_)))))
     {
       update(Feedback::Undocked);
     }
@@ -390,5 +413,6 @@ private:
   bool submitted_{ false }, stop_requested_{ false }, stop_submitted_{ false }, stop_queued_{ false };
   bool terminal_{ false }, success_{ false }, stopped_{ false };
   std::string message_;
+  std::string failure_reason_;
 };
 }

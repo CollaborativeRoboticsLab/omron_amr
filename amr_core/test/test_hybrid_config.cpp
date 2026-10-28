@@ -5,6 +5,7 @@
 #include "amr_core/utils/configuration_protocol.hpp"
 #include "amr_core/utils/deadzone_calibration.hpp"
 #include "amr_core/utils/robot_session.hpp"
+#include "amr_core/interfaces/debug_interface.hpp"
 
 namespace
 {
@@ -54,15 +55,71 @@ Bytes chunk(const Bytes& content, std::size_t count = 1, std::size_t index = 0, 
 }
 }  // namespace
 
+TEST(HybridConfig, DebugDiscoveryOnlyReadsAdvertisedMetadata)
+{
+  ArClientData status("updateStrings", "robot state", 1, nullptr);
+  status.setArgRetDescs("none", "status strings");
+  ArClientData debug("DebugReset", "changes robot state", 2, nullptr);
+  ArClientData drive("ratioDrive", "motion command", 3, nullptr);
+  std::map<unsigned int, ArClientData*> services{ { 1, &status }, { 2, &debug }, { 3, &drive } };
+  const auto discovered = amr_core::DebugInterface::discover(services);
+  ASSERT_EQ(discovered.size(), 2u);
+  EXPECT_EQ(discovered[0].at("name"), "updateStrings");
+  EXPECT_EQ(discovered[0].at("returns"), "status strings");
+  EXPECT_EQ(discovered[1].at("name"), "DebugReset");
+  EXPECT_FALSE(discovered[0].at("read_only_verified").get<bool>());
+  EXPECT_FALSE(discovered[1].at("read_only_verified").get<bool>());
+}
+
+TEST(HybridConfig, DebugStatusRejectsInvalidMotorAndFaultPackets)
+{
+  for (const auto value : { 0, 1, 2, 3, 4 })
+  {
+    ArNetPacket packet;
+    packet.uByteToBuf(static_cast<unsigned char>(value));
+    packet.finalizePacket();
+    packet.resetRead();
+    std::uint8_t state = 99;
+    EXPECT_EQ(amr_core::DebugInterface::readMotorState(&packet, state), value < 4);
+    EXPECT_EQ(state, value < 4 ? value : 99);
+  }
+  ArNetPacket empty;
+  empty.finalizePacket();
+  empty.resetRead();
+  std::uint16_t count = 99;
+  EXPECT_FALSE(amr_core::DebugInterface::readFaultCount(&empty, count));
+  EXPECT_EQ(count, 99);
+  ArNetPacket zero;
+  zero.uByte2ToBuf(0);
+  zero.finalizePacket();
+  zero.resetRead();
+  EXPECT_TRUE(amr_core::DebugInterface::readFaultCount(&zero, count));
+  EXPECT_EQ(count, 0);
+  ArNetPacket malformed;
+  malformed.uByte2ToBuf(0);
+  malformed.uByteToBuf(1);
+  malformed.finalizePacket();
+  malformed.resetRead();
+  EXPECT_FALSE(amr_core::DebugInterface::readFaultCount(&malformed, count));
+  ArNetPacket nonzero;
+  nonzero.uByte2ToBuf(1);
+  nonzero.finalizePacket();
+  nonzero.resetRead();
+  EXPECT_TRUE(amr_core::DebugInterface::readFaultCount(&nonzero, count));
+  EXPECT_EQ(count, 1);
+}
+
 TEST(HybridConfig, RobotSessionRestoresRuntimeLifetimeOnException)
 {
   const auto references = amr_core::detail::ariaRefCount();
-  EXPECT_THROW({
-    amr_core::RobotSession session;
-    EXPECT_EQ(amr_core::detail::ariaRefCount(), references + 1);
-    EXPECT_FALSE(session.client().isConnected());
-    throw std::runtime_error("Injected operation failure");
-  }, std::runtime_error);
+  EXPECT_THROW(
+      {
+        amr_core::RobotSession session;
+        EXPECT_EQ(amr_core::detail::ariaRefCount(), references + 1);
+        EXPECT_FALSE(session.client().isConnected());
+        throw std::runtime_error("Injected operation failure");
+      },
+      std::runtime_error);
   EXPECT_EQ(amr_core::detail::ariaRefCount(), references);
   const amr_core::RobotConnection invalid{ "127.0.0.1", 0, "user", "secret", "6MTX" };
   EXPECT_THROW(amr_core::withRobotSession(invalid, [](auto&) {}), std::invalid_argument);
@@ -102,7 +159,8 @@ TEST(HybridConfig, SharedTelemetryDecodesSignedFieldsAndRejectsTruncation)
       EXPECT_EQ(telemetry.position(), (std::array<int, 3>{ -1234, 5678, -179 }));
       EXPECT_EQ(telemetry.toJson().at("forward_mm_s"), -100);
     }
-    else EXPECT_EQ(telemetry.x_mm, 999);
+    else
+      EXPECT_EQ(telemetry.x_mm, 999);
   }
   amr_core::DriveTelemetry telemetry;
   EXPECT_FALSE(amr_core::readDriveTelemetry(nullptr, telemetry));
@@ -373,6 +431,97 @@ TEST(HybridConfig, RestrictsDeadzoneWriterToOneNumericChange)
   EXPECT_FALSE(amr_core::matchesSingleChangeReceipt({ 1, 0, 1, 0, 0, 0, 0 }));
 }
 
+TEST(HybridConfig, EncodesAndGuardsRotationAndTimeoutWrites)
+{
+  for (const auto& setting : { std::string("RotDeadZone"), std::string("Timeout") })
+  {
+    const auto encoded = setting == "Timeout" ? amr_core::teleopTimeoutRequest(2, 1) :
+                                                amr_core::rotationDeadzoneRequest(2, 1);
+    amr_core::ConfigCursor cursor(encoded);
+    EXPECT_EQ(cursor.number(1), 1U);
+    EXPECT_EQ(cursor.number(1), 0U);
+    EXPECT_EQ(cursor.number(2), 1U);
+    EXPECT_EQ(cursor.number(2), 0U);
+    const auto total = cursor.number(8);
+    EXPECT_EQ(cursor.number(8), total);
+    EXPECT_EQ(cursor.remaining(), total);
+    EXPECT_EQ(cursor.number(4), 1U);
+    EXPECT_EQ(cursor.number(1), 1U);
+    EXPECT_EQ(cursor.number(1), 4U);
+    EXPECT_EQ(cursor.number(1), 1U);
+    EXPECT_EQ(cursor.text(), "Robot Operation");
+    EXPECT_EQ(cursor.text(), "Teleop Settings");
+    EXPECT_EQ(cursor.text(), "");
+    EXPECT_EQ(cursor.text(), setting);
+    EXPECT_EQ(cursor.number(1), static_cast<unsigned>('d'));
+    EXPECT_EQ(cursor.text(), "2");
+    EXPECT_EQ(cursor.text(), "1");
+    EXPECT_EQ(cursor.remaining(), 0U);
+  }
+  EXPECT_THROW(amr_core::rotationDeadzoneRequest(5, 0), std::invalid_argument);
+  EXPECT_THROW(amr_core::rotationDeadzoneRequest(5, 5), std::invalid_argument);
+  EXPECT_THROW(amr_core::teleopTimeoutRequest(2, 0), std::invalid_argument);
+  EXPECT_THROW(amr_core::teleopTimeoutRequest(2, std::numeric_limits<double>::infinity()), std::invalid_argument);
+  EXPECT_THROW(amr_core::teleopTimeoutRequest(2, 2), std::invalid_argument);
+  EXPECT_THROW(amr_core::teleopNumericRequest("Timeout", "2", "1\nextra"), std::invalid_argument);
+  EXPECT_THROW(amr_core::teleopNumericRequest("other", "2", "1"), std::invalid_argument);
+}
+
+TEST(HybridConfig, GuardsRotationAndTimeoutAgainstUnexpectedChanges)
+{
+  for (const auto& name : { std::string("RotDeadZone"), std::string("Timeout") })
+  {
+    for (const auto& scenario : { std::string("success"), std::string("wrong-start"), std::string("moving"),
+                                  std::string("preflight-change"), std::string("wrong-after"),
+                                  std::string("other-change"), std::string("bad-receipt") })
+    {
+      nlohmann::json snapshot{ { "complete", true }, { "read_only", true }, { "parameters", nlohmann::json::array() } };
+      for (const auto& parameter_name : amr_core::driveParameters)
+        snapshot["parameters"].push_back({ { "section", "Teleop Settings" }, { "name", parameter_name },
+                                           { "value", parameter_name == name ? 2 : 5 } });
+      int reads = 0;
+      int writes = 0;
+      nlohmann::json report{ { "complete", false }, { "write_attempted", false } };
+      const auto read = [&]() {
+        auto result = snapshot;
+        ++reads;
+        for (auto& parameter : result["parameters"])
+        {
+          if (parameter["name"] == name)
+          {
+            if (scenario == "wrong-start") parameter["value"] = 3;
+            if (reads == 3 && scenario != "wrong-after") parameter["value"] = 1;
+          }
+          const std::string other = name == "RotDeadZone" ? "TransDeadZone" : "RotDeadZone";
+          if (parameter["name"] == other && ((scenario == "preflight-change" && reads == 2) ||
+                                               (scenario == "other-change" && reads == 3)))
+            parameter["value"] = 6;
+        }
+        return result;
+      };
+      const auto write = [&](const Bytes& encoded) {
+        ++writes;
+        EXPECT_EQ(encoded, name == "Timeout" ? amr_core::teleopTimeoutRequest(2, 1) :
+                                              amr_core::rotationDeadzoneRequest(2, 1));
+        return scenario != "bad-receipt";
+      };
+      if (scenario == "success")
+      {
+        EXPECT_NO_THROW(amr_calibration::changeTeleopSetting(name, 2, 1, 5, read,
+                        [&]() { return scenario != "moving"; }, write, report));
+        EXPECT_TRUE(report.at("complete").get<bool>());
+      }
+      else
+      {
+        EXPECT_THROW(amr_calibration::changeTeleopSetting(name, 2, 1, 5, read,
+                     [&]() { return scenario != "moving"; }, write, report), std::exception);
+        EXPECT_FALSE(report.at("complete").get<bool>());
+      }
+      EXPECT_EQ(writes, scenario == "wrong-start" || scenario == "moving" || scenario == "preflight-change" ? 0 : 1);
+    }
+  }
+}
+
 TEST(HybridConfig, ConfigurationInterfaceRejectsDisconnectedOperations)
 {
   Aria::init();
@@ -382,6 +531,8 @@ TEST(HybridConfig, ConfigurationInterfaceRejectsDisconnectedOperations)
     EXPECT_THROW(configuration.getValues(), std::runtime_error);
     EXPECT_THROW(configuration.setTranslationDeadzone(10, 14), std::runtime_error);
     EXPECT_THROW(configuration.setTranslationDeadzone(10, 10), std::invalid_argument);
+    EXPECT_THROW(configuration.setRotationDeadzone(5, 6), std::runtime_error);
+    EXPECT_THROW(configuration.setTeleopTimeout(2, 1), std::runtime_error);
     EXPECT_FALSE(client.isConnected());
   }
   Aria::shutdown();

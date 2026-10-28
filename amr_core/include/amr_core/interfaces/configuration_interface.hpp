@@ -102,7 +102,22 @@ public:
 
   bool setTranslationDeadzone(int expected, int target)
   {
-    const auto encoded = translationDeadzoneRequest(expected, target);
+    return writeSingleValue(translationDeadzoneRequest(expected, target));
+  }
+
+  bool setRotationDeadzone(int expected, int target)
+  {
+    return writeSingleValue(rotationDeadzoneRequest(expected, target));
+  }
+
+  bool setTeleopTimeout(double expected, double target)
+  {
+    return writeSingleValue(teleopTimeoutRequest(expected, target));
+  }
+
+private:
+  bool writeSingleValue(const std::vector<std::uint8_t>& encoded)
+  {
     requireService("setConfigValues");
     Receipt receipt;
     ArFunctor1C<Receipt, ArNetPacket*> callback(&receipt, &Receipt::receive);
@@ -124,7 +139,6 @@ public:
            !client_.hasTransportFailure();
   }
 
-private:
   class Receipt
   {
   public:

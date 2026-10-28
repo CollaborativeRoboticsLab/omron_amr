@@ -98,6 +98,7 @@ if(BUILD_TESTING)
     APPEND_ENV "AMR_DEADZONE_WRITER=$<TARGET_FILE:amr_deadzone_writer>"
                "AMR_DEADZONE_CALIBRATION=$<TARGET_FILE:amr_deadzone_calibration>"
   )
+  ament_add_pytest_test(test_drive_pulse_offline test/test_drive_pulse_offline.py)
 endif()
 
 ament_export_include_directories(include)

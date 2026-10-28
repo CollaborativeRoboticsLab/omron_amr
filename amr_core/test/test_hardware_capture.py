@@ -187,6 +187,44 @@ def test_production_writer_rejects_unconfirmed_or_invalid_requests_before_connec
             listener.accept()
 
 
+@pytest.mark.parametrize('operation,token,expected,target,unchanged', [
+    ('--apply-rotation', 'APPLY_ROTATION_DEADZONE', '5', '6', '14'),
+    ('--apply-timeout', 'APPLY_TELEOP_TIMEOUT', '2', '1', '5'),
+])
+@pytest.mark.parametrize('scenario', ['no-environment', 'bad-token', 'same-target', 'zero-target',
+                                      'nonfinite', 'bad-unchanged', 'missing-confirmation'])
+def test_teleop_writer_rejects_invalid_requests_before_connecting(operation, token, expected, target,
+                                                                   unchanged, scenario):
+    binary = Path(os.environ.get('AMR_DEADZONE_WRITER',
+                  Path(__file__).resolve().parents[4] / 'build/amr_core/amr_deadzone_writer'))
+    if not binary.is_file():
+        pytest.skip('Build amr_deadzone_writer to exercise its offline command gates.')
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        listener.setblocking(False)
+        fields = ['127.0.0.1', str(listener.getsockname()[1]), 'test-user', 'test-only-private-value',
+                  '6MTX', expected, target, unchanged, token]
+        options = [operation, '--confirm-write']
+        environment = dict(os.environ, AMR_APPLY_TELEOP_SETTING='CONFIRMED')
+        if scenario == 'no-environment':
+            environment.pop('AMR_APPLY_TELEOP_SETTING')
+        elif scenario == 'missing-confirmation':
+            options.pop()
+        else:
+            index, value = {'bad-token': (8, 'UNCONFIRMED'), 'same-target': (6, expected),
+                            'zero-target': (6, '0'), 'nonfinite': (6, 'nan'),
+                            'bad-unchanged': (7, '100')}[scenario]
+            fields[index] = value
+        result = subprocess.run([str(binary), *options], input='\n'.join(fields) + '\n', text=True,
+                                capture_output=True, timeout=3, env=environment)
+        assert result.returncode == 2
+        assert 'no connection opened' in result.stderr
+        assert 'test-only-private-value' not in result.stdout + result.stderr
+        with pytest.raises(BlockingIOError):
+            listener.accept()
+
+
 def calibration_binary():
     binary = Path(os.environ.get('AMR_DEADZONE_CALIBRATION',
                   Path(__file__).resolve().parents[4] / 'build/amr_core/amr_deadzone_calibration'))

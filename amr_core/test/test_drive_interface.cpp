@@ -242,6 +242,45 @@ protected:
     return false;
   }
 
+  void checkVelocityStream(double linear, double angular)
+  {
+    node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
+    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 0.2));
+    node_->declare_parameter<double>("driver.min_linear_speed", -200.0);
+    auto stop_publisher = node_->create_publisher<std_msgs::msg::Empty>("/drive_test/stop", 10);
+    initializeDriver();
+    ASSERT_TRUE(waitWithExecutor([&stop_publisher]() { return stop_publisher->get_subscription_count() > 0; }));
+    const auto started = std::chrono::steady_clock::now();
+    auto next_publish = started;
+    ASSERT_TRUE(waitWithExecutor([this, linear, angular, started, &next_publish]() {
+      const auto now = std::chrono::steady_clock::now();
+      if (now - started >= 500ms)
+        return true;
+      if (now >= next_publish)
+      {
+        publish(linear, angular);
+        next_publish = now + 50ms;
+      }
+      return false;
+    }));
+    stop_publisher->publish(std_msgs::msg::Empty{});
+    ASSERT_TRUE(waitWithExecutor([this]() {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+    }));
+    const auto expected_translation = linear * 100.0;
+    const auto expected_rotation = angular * 180.0 / M_PI / 60.0 * 100.0;
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+    ASSERT_NE(stop, records_.end());
+    EXPECT_GE(std::count_if(records_.begin(), stop,
+                            [expected_translation, expected_rotation](const Record& record) {
+                              return !record.stop && std::fabs(record.translation - expected_translation) < 1e-3 &&
+                                     std::fabs(record.rotation - expected_rotation) < 1e-3;
+                            }),
+              3);
+  }
+
   void initializeSmootherChain()
   {
     node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
@@ -450,6 +489,60 @@ protected:
   Telemetry telemetry_;
 };
 
+TEST_F(DriverInterfaceLoopbackTest, StreamsForwardThenStops)
+{
+  checkVelocityStream(0.5, 0.0);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, StreamsReverseThenStops)
+{
+  checkVelocityStream(-0.2, 0.0);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, StreamsLeftTurnThenStops)
+{
+  checkVelocityStream(0.0, 0.5);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, StreamsRightTurnThenStops)
+{
+  checkVelocityStream(0.0, -0.5);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, StreamsForwardLeftThenStops)
+{
+  checkVelocityStream(0.5, 0.5);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, StreamsForwardRightThenStops)
+{
+  checkVelocityStream(0.5, -0.5);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ForwardHalfMetreCommandStopsWithoutResuming)
+{
+  node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
+  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 0.2));
+  auto stop_publisher = node_->create_publisher<std_msgs::msg::Empty>("/drive_test/stop", 10);
+  initializeDriver();
+  ASSERT_TRUE(waitWithExecutor([&stop_publisher]() { return stop_publisher->get_subscription_count() > 0; }));
+
+  publish(0.5, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  stop_publisher->publish(std_msgs::msg::Empty{});
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  const auto stop_received = std::chrono::steady_clock::now();
+  ASSERT_TRUE(
+      waitWithExecutor([stop_received]() { return std::chrono::steady_clock::now() - stop_received >= 250ms; }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  ASSERT_NE(stop, records_.end());
+  EXPECT_TRUE(std::none_of(stop + 1, records_.end(), [](const Record& record) { return !record.stop; }));
+}
+
 TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnforcesDeadline)
 {
   using Action = nav2_msgs::action::UndockRobot;
@@ -535,13 +628,58 @@ TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnfor
   EXPECT_EQ(timed_out.get().code, rclcpp_action::ResultCode::ABORTED);
   EXPECT_FALSE(timed_out.get().result->success);
   EXPECT_EQ(timed_out.get().result->error_code, Action::Result::FAILED_TO_CONTROL);
-  EXPECT_FALSE(timed_out.get().result->error_msg.empty());
+  EXPECT_NE(timed_out.get().result->error_msg.find("Undocking deadline exceeded"), std::string::npos);
+  EXPECT_NE(timed_out.get().result->error_msg.find("last dockInfo state="), std::string::npos);
+  EXPECT_NE(timed_out.get().result->error_msg.find("control remains inhibited"), std::string::npos);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     EXPECT_EQ(undock_requests_, 2);
     ASSERT_FALSE(records_.empty());
     EXPECT_TRUE(std::all_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; }));
   }
+}
+
+TEST_F(DriverInterfaceLoopbackTest, UndockedReadinessRemainsFreshDuringNormalMotion)
+{
+  using Docking = amr_core::DockingInterface;
+  ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
+  ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 0;
+    telemetry_.forward_mm_s = 0;
+  }
+  driver_ = std::make_unique<DriverInterface>(node_);
+  initializeDriver();
+  docking_ = driver_->dockingInterface();
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->readiness().state == Docking::State::Ready; }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    telemetry_.forward_mm_s = 100;
+  }
+  const auto moving = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([moving]() { return std::chrono::steady_clock::now() - moving >= 400ms; }));
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Ready);
+  publish(0.5, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 1;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->readiness().state != Docking::State::Ready; }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 0;
+  }
+  const auto still_moving = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([still_moving]() { return std::chrono::steady_clock::now() - still_moving >= 400ms; }));
+  EXPECT_NE(docking_->readiness().state, Docking::State::Ready);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    telemetry_.forward_mm_s = 0;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->readiness().state == Docking::State::Ready; }));
 }
 
 TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReservationAndSettledDeparture)
@@ -572,10 +710,30 @@ TEST_F(DriverInterfaceLoopbackTest, DockingBackendCancellationBeforeBeginNeverSu
   docking_->beginUndock();
   ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
   EXPECT_FALSE(docking_->operationStatus().success);
+  EXPECT_NE(docking_->operationStatus().message.find("Undocking canceled by caller"), std::string::npos);
   EXPECT_EQ(docking_->readiness().state, amr_core::DockingInterface::State::Failed);
   std::lock_guard<std::mutex> lock(mutex_);
   EXPECT_EQ(undock_requests_, 0);
   EXPECT_TRUE(std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ReadinessStatusTracksDockingInhibition)
+{
+  using Docking = amr_core::DockingInterface;
+  docking_->update(Docking::Feedback::Docked);
+  bool received = false;
+  bool ready = true;
+  auto subscription = node_->create_subscription<std_msgs::msg::Bool>(
+      "amr/drive_ready", 10, [&received, &ready](const std_msgs::msg::Bool& message) {
+        received = true;
+        ready = message.data;
+      });
+  initializeDriver();
+  ASSERT_TRUE(waitWithExecutor([&received, &ready]() { return received && !ready; }));
+  docking_->update(Docking::Feedback::Undocked);
+  ASSERT_TRUE(waitWithExecutor([&ready]() { return ready; }));
+  docking_->update(Docking::Feedback::Unknown);
+  ASSERT_TRUE(waitWithExecutor([&ready]() { return !ready; }));
 }
 
 TEST_F(DriverInterfaceLoopbackTest, MissingDockingBackendDefaultsToVelocityInhibited)

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -14,21 +15,33 @@
 
 namespace amr_core
 {
-inline std::vector<std::uint8_t> translationDeadzoneRequest(int expected, int target)
+inline std::vector<std::uint8_t> teleopNumericRequest(const std::string& name, const std::string& expected,
+                                                      const std::string& target)
 {
-  if (expected < 1 || expected > 99 || target < 1 || target > 99 || expected == target)
-  {
-    throw std::invalid_argument("Dead-zone change requires distinct integer percentages in [1, 99]");
-  }
+  if (name != "TransDeadZone" && name != "RotDeadZone" && name != "Timeout")
+    throw std::invalid_argument("Unsupported teleop parameter");
+  const auto parse = [](const std::string& value) {
+    double parsed_value = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || !std::isfinite(parsed_value))
+      throw std::invalid_argument("Invalid numeric teleop value");
+    return parsed_value;
+  };
+  const auto old_value = parse(expected);
+  const auto new_value = parse(target);
+  if (old_value <= 0 || new_value <= 0 || old_value == new_value ||
+      (name != "Timeout" && (old_value > 99 || new_value > 99 ||
+                              old_value != std::trunc(old_value) || new_value != std::trunc(new_value))))
+    throw std::invalid_argument("Invalid teleop value change");
   std::vector<std::uint8_t> body{ 1, 0, 0, 0, 1, 4, 1 };
   for (const auto& field : { std::string("Robot Operation"), std::string("Teleop Settings"), std::string(),
-                             std::string("TransDeadZone") })
+                             name })
   {
     body.insert(body.end(), field.begin(), field.end());
     body.push_back(0);
   }
   body.push_back('d');
-  for (const auto& field : { std::to_string(expected), std::to_string(target) })
+  for (const auto& field : { expected, target })
   {
     body.insert(body.end(), field.begin(), field.end());
     body.push_back(0);
@@ -44,6 +57,38 @@ inline std::vector<std::uint8_t> translationDeadzoneRequest(int expected, int ta
   }
   request.insert(request.end(), body.begin(), body.end());
   return request;
+}
+
+inline std::vector<std::uint8_t> deadzoneRequest(const std::string& name, int expected, int target)
+{
+  if ((name != "TransDeadZone" && name != "RotDeadZone") || expected < 1 || expected > 99 ||
+      target < 1 || target > 99 || expected == target)
+    throw std::invalid_argument("Dead-zone change requires a supported parameter and distinct percentages in [1, 99]");
+  return teleopNumericRequest(name, std::to_string(expected), std::to_string(target));
+}
+
+inline std::vector<std::uint8_t> translationDeadzoneRequest(int expected, int target)
+{
+  return deadzoneRequest("TransDeadZone", expected, target);
+}
+
+inline std::vector<std::uint8_t> rotationDeadzoneRequest(int expected, int target)
+{
+  return deadzoneRequest("RotDeadZone", expected, target);
+}
+
+inline std::vector<std::uint8_t> teleopTimeoutRequest(double expected, double target)
+{
+  if (!std::isfinite(expected) || !std::isfinite(target) || expected <= 0.0 || target <= 0.0 || expected == target)
+    throw std::invalid_argument("Timeout change requires distinct positive finite values");
+  const auto decimal = [](double value) {
+    char buffer[64];
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general,
+                                      std::numeric_limits<double>::max_digits10);
+    if (result.ec != std::errc{}) throw std::invalid_argument("Timeout cannot be encoded");
+    return std::string(buffer, result.ptr);
+  };
+  return teleopNumericRequest("Timeout", decimal(expected), decimal(target));
 }
 
 inline bool matchesSingleChangeReceipt(const std::vector<std::uint8_t>& payload)
