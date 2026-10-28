@@ -1,0 +1,8 @@
+2D-Map
+NumPoints: 0
+NumLines: 0
+Resolution: 20
+MapInfo: DockType Name=DockLynx "Label=LD/Lynx Dock" "NameRequired=1" "IsUseProxy=1" "Color0=0xffff00" "Heading=Required" "TaskListCount=10" "TaskListIds=DockForcedDock|DockIdleDock|DockRequestedDock|DockDrivingToDock|DockDrivingIntoDock|DockDocked|DockNowUnforced|DockNowForced|DockUndocking|DockUndocked" "TaskListLabels=Forced dock|Idle dock|Requested dock|Driving to dock|Driving into dock|Docked|Dock now unforced|Dock now forced|Undocking|Undocked" "TaskClasses=Instant|Custom" "MenuCategory=DockGoal" "Label=LD/Lynx Dock"
+Cairn: DockLynx 0 0 -180.000000 "" ICON "LD/Lynx Dock1"
+LINES
+DATA
