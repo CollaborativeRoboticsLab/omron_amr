@@ -57,6 +57,7 @@ The published angle increment is inferred from the packet when enough points are
 - `driver.cmd_vel_topic`: velocity command topic consumed by `amr_core`.
 - `driver.stop_topic`: stop command topic.
 - `driver.drive_ready_topic`: mode and docking readiness status topic, default `amr/drive_ready` (`std_msgs/Bool`). A fresh `true` indicates those gates are open; it does not acknowledge command delivery, indicate that no stop is pending, or certify physical safety. Treat missing or stale updates as not ready.
+- `docking.forward_departure_bypass`: experimental, default `false`. Requires explicit contact-dock/no-cable and exclusive-control confirmations. Allows one straight forward command up to 0.2 m/s for at most 0.5 s with fresh Docked feedback and stationary telemetry at startup; normal undocking action is disabled. Readiness in this mode means eligibility for that one attempt only. The limits are command limits, not verified physical speed or a protective stop. Direct departure support by the installed firmware is unverified.
 - `driver.publish_odom`: enables odometry publication from `amr_core`.
 - `driver.publish_robot_tf`: enables the `odom -> base_link` TF publisher.
 - `driver.odom_frame`: frame id assigned to published odometry.

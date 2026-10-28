@@ -77,6 +77,7 @@ public:
   }
 
   std::shared_ptr<amr_core::DockingInterface> dockingInterface() const { return docking_; }
+  bool forwardDepartureBypassEnabled() const { return forward_departure_bypass_; }
 
   /**
    * @brief Initializes parameters, publishers, and subscribers.
@@ -117,6 +118,13 @@ public:
     max_lin_speed_ = getOrDeclareParameter<double>("driver.max_linear_speed", 1000.0);  // mm/s
     drive_throttle_pct_ = getOrDeclareParameter<double>("driver.drive_throttle_pct", 100.0);
     unsafe_drive_ = getOrDeclareParameter<bool>("driver.unsafe_drive", true);
+    forward_departure_bypass_ = getOrDeclareParameter<bool>("docking.forward_departure_bypass", false);
+    if (forward_departure_bypass_ &&
+      (!manage_docking_ || !getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false) ||
+         !getOrDeclareParameter<bool>("docking.exclusive_control_confirmed", false)))
+    {
+      throw std::invalid_argument("Forward departure bypass requires contact dock and exclusive control confirmation");
+    }
     cmd_vel_timeout_sec_ = getOrDeclareParameter<double>("driver.cmd_vel_timeout_sec", 0.2);
     mode_check_period_sec_ = getOrDeclareParameter<double>("driver.mode_check_period_sec", 0.5);
     mode_confirmation_timeout_sec_ = getOrDeclareParameter<double>("driver.mode_confirmation_timeout_sec", 2.0);
@@ -180,7 +188,11 @@ public:
     cycle_registered_ = true;
     client_.runAsync();
     network_started_ = true;
-    if (docking_->readiness().state != amr_core::DockingInterface::State::Ready)
+    if (forward_departure_bypass_)
+    {
+      RCLCPP_WARN(node_->get_logger(), "Experimental forward dock-departure bypass enabled; one bounded attempt only");
+    }
+    else if (docking_->readiness().state != amr_core::DockingInterface::State::Ready)
     {
       RCLCPP_WARN(node_->get_logger(), "Velocity inhibited until fresh docking readiness is verified");
     }
@@ -381,6 +393,7 @@ private:
     if (!amr_core::readDriveTelemetry(packet, telemetry))
     {
       body_feedback_.valid = false;
+      if (manage_docking_) docking_->invalidateObservation();
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
                            "Rejected truncated or invalid updateNumbers packet; speed feedback invalidated");
       return;
@@ -469,6 +482,9 @@ private:
    */
   void stopCB(const std_msgs::msg::Empty& /*msg*/)
   {
+    docking_->withReadiness([&](amr_core::DockingInterface::Readiness) {
+      if (forward_departure_bypass_) departure_finished_ = true;
+    });
     if (manage_docking_) docking_->cancelUndock();
     command_policy_->requestStop();
     RCLCPP_INFO(node_->get_logger(), "Explicit drive stop requested");
@@ -493,21 +509,53 @@ private:
         std::fabs(msg.linear.y) > 1e-6 || std::fabs(msg.linear.z) > 1e-6 ||
         std::fabs(msg.angular.x) > 1e-6 || std::fabs(msg.angular.y) > 1e-6)
     {
+      if (forward_departure_bypass_)
+      {
+        docking_->withReadiness([&](amr_core::DockingInterface::Readiness) {
+          if (departure_started_ && !departure_finished_)
+          {
+            departure_finished_ = true;
+            command_policy_->requestStop();
+          }
+        });
+      }
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
                            "Rejected invalid or unsupported cmd_vel; command freshness was not updated");
       return;
     }
 
     docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
-      if (readiness.state != amr_core::DockingInterface::State::Ready)
+      const auto now = amr_core::DriveCommandPolicy::Clock::now();
+      if (forward_departure_bypass_)
+      {
+        if (departure_finished_) return;
+        if (readiness.state != amr_core::DockingInterface::State::Docked ||
+            !readiness.departure_telemetry_fresh || (!departure_started_ && !readiness.departure_stationary) ||
+            msg.linear.x <= 0.0 || msg.linear.x > 0.2 || msg.angular.z != 0.0 ||
+            (departure_started_ && now - departure_started_at_ >= std::chrono::milliseconds(500)))
+        {
+          if (departure_started_ && !departure_finished_)
+          {
+            departure_finished_ = true;
+            command_policy_->requestStop();
+          }
+          return;
+        }
+      }
+      else if (readiness.state != amr_core::DockingInterface::State::Ready)
       {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
                              "Ignored cmd_vel: docking readiness is not verified; request undocking explicitly");
         return;
       }
-      if (command_policy_->accept({ msg.linear.x, msg.angular.z }, amr_core::DriveCommandPolicy::Clock::now()))
+      if (command_policy_->accept({ msg.linear.x, msg.angular.z }, now))
       {
         command_generation_ = readiness.generation;
+        if (forward_departure_bypass_ && !departure_started_)
+        {
+          departure_started_ = true;
+          departure_started_at_ = now;
+        }
       }
       else
       {
@@ -545,7 +593,11 @@ private:
       if (now - last_ready_published_ >= std::chrono::milliseconds(50))
       {
         std_msgs::msg::Bool message;
-        message.data = mode_confirmed_.load() && readiness.state == amr_core::DockingInterface::State::Ready;
+        message.data = mode_confirmed_.load() && (forward_departure_bypass_ ?
+          !departure_finished_ && readiness.departure_telemetry_fresh &&
+            (departure_started_ || readiness.departure_stationary) &&
+            readiness.state == amr_core::DockingInterface::State::Docked :
+          readiness.state == amr_core::DockingInterface::State::Ready);
         drive_ready_pub_->publish(message);
         last_ready_published_ = now;
       }
@@ -555,9 +607,20 @@ private:
   void handleDriveCommands(amr_core::DriveCommandPolicy::TimePoint now,
                            amr_core::DockingInterface::Readiness readiness)
   {
+    if (forward_departure_bypass_ && departure_started_ && !departure_finished_ &&
+        (readiness.state != amr_core::DockingInterface::State::Docked || !readiness.departure_telemetry_fresh ||
+         now - departure_started_at_ >= std::chrono::milliseconds(500)))
+    {
+      departure_finished_ = true;
+      command_policy_->requestStop();
+    }
     const auto decision = command_policy_->poll(now);
     if (decision.action == amr_core::DriveCommandPolicy::Action::Drive &&
-        (readiness.state != amr_core::DockingInterface::State::Ready ||
+        ((forward_departure_bypass_ ?
+              departure_finished_ || !readiness.departure_telemetry_fresh ||
+                  readiness.state != amr_core::DockingInterface::State::Docked ||
+                  decision.command.linear <= 0.0 || decision.command.linear > 0.2 || decision.command.angular != 0.0 :
+              readiness.state != amr_core::DockingInterface::State::Ready) ||
          command_generation_ != readiness.generation))
     {
       command_policy_->requestStop();
@@ -565,6 +628,7 @@ private:
     }
     if (decision.action == amr_core::DriveCommandPolicy::Action::Stop)
     {
+      if (forward_departure_bypass_) departure_finished_ = true;
       const bool queued = client_.requestOnce("stop", nullptr, true);
       command_policy_->completeStopAttempt(queued);
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
@@ -685,6 +749,10 @@ private:
   double mode_check_period_sec_{ 0.5 };
   double mode_confirmation_timeout_sec_{ 2.0 };
   bool unsafe_drive_{ true };
+  bool forward_departure_bypass_{ false };
+  bool departure_started_{ false };
+  bool departure_finished_{ false };
+  amr_core::DriveCommandPolicy::TimePoint departure_started_at_{};
 
   std::mutex pose_mutex_;
   

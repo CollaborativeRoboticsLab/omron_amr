@@ -56,6 +56,10 @@ public:
     if (client_) throw std::logic_error("Docking transport is already attached");
     client_ = &client;
     contact_confirmed_ = contact_confirmed;
+    {
+      std::lock_guard<std::mutex> state_lock(mutex_);
+      departure_contact_confirmed_ = contact_confirmed;
+    }
     request_ = [this]() { return client_->requestOnce("undock", nullptr, true); };
     supported_ = client.dataExists("dockInfo") && client.dataExists("undock") && client.dataExists("stop") &&
                  client.dataExists("updateNumbers") && client.addHandler("dockInfo", &info_callback_);
@@ -132,6 +136,19 @@ public:
     }
     zero_velocity_ = zero;
     telemetry_received_ = now;
+    {
+      std::lock_guard<std::mutex> state_lock(mutex_);
+      departure_telemetry_received_ = now;
+      departure_have_telemetry_ = true;
+      departure_stationary_ = zero && now - stationary_since_ >= std::chrono::milliseconds(500);
+    }
+  }
+
+  void invalidateObservation()
+  {
+    std::lock_guard<std::mutex> state_lock(mutex_);
+    departure_have_telemetry_ = false;
+    departure_stationary_ = false;
   }
 
   void cycle(bool mode_ready)
@@ -299,13 +316,15 @@ public:
   {
     State state;
     unsigned long long generation;
+    bool departure_telemetry_fresh;
+    bool departure_stationary;
   };
 
   Readiness readiness(TimePoint now = Clock::now())
   {
     std::lock_guard<std::mutex> lock(mutex_);
     refresh(now);
-    return { state_, generation_ };
+    return { state_, generation_, departureTelemetryFresh(now), departure_stationary_ };
   }
 
   template <typename Operation>
@@ -313,10 +332,16 @@ public:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     refresh(Clock::now());
-    operation(Readiness{ state_, generation_ });
+    operation(Readiness{ state_, generation_, departureTelemetryFresh(Clock::now()), departure_stationary_ });
   }
 
 private:
+  bool departureTelemetryFresh(TimePoint now) const
+  {
+    return departure_contact_confirmed_ && departure_have_telemetry_ && now >= departure_telemetry_received_ &&
+           now - departure_telemetry_received_ < std::chrono::milliseconds(200);
+  }
+
   std::string failureContext(TimePoint now) const
   {
     return failure_reason_ + "; last dockInfo state=" +
@@ -403,6 +428,8 @@ private:
   TimePoint started_{};
   bool have_feedback_{ false };
   unsigned long long generation_{ 0 };
+  TimePoint departure_telemetry_received_{};
+  bool departure_contact_confirmed_{ false }, departure_have_telemetry_{ false }, departure_stationary_{ false };
   DriveClient* client_{ nullptr };
   ArFunctor1C<DockingInterface, ArNetPacket*> info_callback_;
   std::mutex operation_mutex_;

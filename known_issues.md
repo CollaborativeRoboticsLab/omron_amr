@@ -15,6 +15,14 @@ remains unknown; motor power was reported enabled before the second attempt,
 but fault status was unavailable. Motor power alone does not establish that
 motion is permitted.
 
+On 2026-10-28, a separately authorized 0.1-second forward pulse was attempted
+from the dock using the experimental bypass. The operator observed no movement
+and reported a similar "decoupling" message. The audit recorded zero odometric
+displacement and unacknowledged stop delivery. Post-test and later read-only
+checks reported Undocking (state 3) and stationary telemetry; the cause of the
+state change and firmware cancellation remain unknown. The private audit is
+`build/amr_core/drive-pulse/forward-stream-20261028T050327Z.json`.
+
 Do not automatically retry or assume that a stop request canceled firmware
 undocking. Inspect the current robot state and faults and use supported recovery
 procedures before further movement. See the [experiment log](docs/experiement_log.md)

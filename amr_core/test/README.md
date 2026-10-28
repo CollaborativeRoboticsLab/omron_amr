@@ -114,6 +114,21 @@ The driver requests its configured `unsafe_drive` mode at startup. Docking
 readiness and the `drive_ready` topic are not protective safety functions.
 Firmware undocking remains unresolved; see [known issues](../../known_issues.md).
 
+The experimental dock-departure bypass is default-off and has been tested only
+with a fake server. It requires fresh Docked feedback, stationary telemetry,
+and explicit contact-dock and exclusive-control confirmations. It permits one
+straight-forward request of 0.2 m/s for at most 0.5 s, then latches off until
+restart; the undock action is disabled in this mode. Direct departure support by
+the installed firmware, actual speed, and stop delivery are unverified. Only
+after separate approval for this specific motion, a single 0.1 s test is:
+
+```bash
+source install/setup.bash
+python3 src/omron_amr/amr_core/test/drive_pulse.py --execute \
+	--scenario forward --duration-sec 0.1 --confirm-contact-dock-no-cable \
+	--forward-departure-bypass --confirm-exclusive-control
+```
+
 ## Distance and Velocity Calibration
 
 Odometry alone cannot validate its own accuracy: compare it with a measured

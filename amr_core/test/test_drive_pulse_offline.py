@@ -102,3 +102,16 @@ def test_contact_dock_must_be_explicitly_confirmed():
         drive_pulse.require_contact_dock(False)
     drive_pulse.require_contact_dock(True)
 
+
+@pytest.mark.parametrize(('scenario', 'duration', 'confirmed'), [
+    ('reverse', 0.5, True), ('forward-left', 0.5, True), ('forward', 0.51, True),
+    ('forward', 0.0, True), ('forward', float('nan'), True), ('forward', 0.5, False),
+])
+def test_departure_rejects_unapproved_request(scenario, duration, confirmed):
+    with pytest.raises(ValueError):
+        drive_pulse.departure_command(scenario, duration, confirmed)
+
+
+def test_departure_uses_bounded_forward_command():
+    assert drive_pulse.departure_command('forward', 0.1, True) == (0.2, 0.0)
+

@@ -747,6 +747,86 @@ TEST_F(DriverInterfaceLoopbackTest, MissingDockingBackendDefaultsToVelocityInhib
   EXPECT_TRUE(records_.empty());
 }
 
+TEST_F(DriverInterfaceLoopbackTest, DockedDepartureBypassAllowsOnlyBoundedForward)
+{
+  using Docking = amr_core::DockingInterface;
+  node_->declare_parameter<bool>("docking.forward_departure_bypass", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("docking.exclusive_control_confirmed", true);
+  initializeDockingBackend();
+  for (const auto& command : std::vector<std::pair<double, double>>{{-0.2, 0.0}, {0.2, 0.1}, {0.4, 0.0}})
+  {
+    publish(command.first, command.second);
+    const auto blocked = std::chrono::steady_clock::now();
+    ASSERT_TRUE(waitWithExecutor([blocked]() { return std::chrono::steady_clock::now() - blocked > 80ms; }));
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_TRUE(records_.empty());
+  }
+  publish(0.2, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(20.0, 0.0); }));
+  docking_->update(Docking::Feedback::Unknown);
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !records_.empty() && records_.back().stop;
+  }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, DockedDepartureBypassTimesOutAndCannotRestart)
+{
+  node_->declare_parameter<bool>("docking.forward_departure_bypass", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("docking.exclusive_control_confirmed", true);
+  initializeDockingBackend();
+  const auto started = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([this, started]() {
+    publish(0.2, 0.0);
+    return std::chrono::steady_clock::now() - started > 700ms;
+  }));
+  ASSERT_TRUE(receivedDrive(20.0, 0.0));
+  std::size_t count_after_stop;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ASSERT_FALSE(records_.empty());
+    ASSERT_TRUE(records_.back().stop);
+    count_after_stop = records_.size();
+  }
+  publish(0.2, 0.0);
+  const auto later = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([later]() { return std::chrono::steady_clock::now() - later > 150ms; }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_EQ(records_.size(), count_after_stop);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, DockedDepartureBypassRequiresExplicitConfirmations)
+{
+  node_->declare_parameter<bool>("docking.forward_departure_bypass", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  driver_ = std::make_unique<DriverInterface>(node_);
+  EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
+               std::invalid_argument);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, DockedDepartureBypassStopsOnTelemetryLoss)
+{
+  node_->declare_parameter<bool>("docking.forward_departure_bypass", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("docking.exclusive_control_confirmed", true);
+  initializeDockingBackend();
+  publish(0.2, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(20.0, 0.0); }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_odometry_ = true;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    publish(0.2, 0.0);
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !records_.empty() && records_.back().stop;
+  }));
+}
+
 TEST_F(DriverInterfaceLoopbackTest, DockingBlocksVelocityUntilExplicitDepartureAndFreshInput)
 {
   using Docking = amr_core::DockingInterface;
