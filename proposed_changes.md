@@ -3,13 +3,13 @@
 ## 1. Scope and Baseline
 
 Reviewed baseline: `omron_amr` branch `develop`, commit `a7a9e5a8`.
-This document tracks the plan and initial implementation. Checked tasks indicate
-completed software work only unless explicitly stated; no hardware validation
-has been performed.
+This document tracks the plan and implementation. Checked tasks indicate
+completed work only within the scope stated. Supervised robot experiments have
+been performed, but hardware acceptance remains incomplete.
 
 ### Robot Work Deferred
 
-The robot is not connected to this machine. Live configuration capture,
+The robot is not connected to this machine. Further live configuration capture,
 firmware/service verification, velocity calibration, joystick arbitration,
 physical stopping tests, and Nav2 hardware acceptance are deferred until the
 robot and a supervised test session are available. Keep their checklist items
@@ -18,12 +18,33 @@ as part of offline work.
 
 Keep `ratio_mapping: legacy`, `calibration.confirmed: false`, and
 `unsafe_drive: true` unchanged. Resume with read-only configuration capture
-before enabling calibrated mapping or running supervised motion tests.
+before enabling calibrated mapping or running supervised motion tests. Inspect
+the robot's current docking state and faults and follow supported recovery
+procedures before any further movement; do not automatically retry undocking.
 
 Offline odometry heading/wrap/TF checks and the initial Nav2 topic/QoS/limit
 review are now complete. Remaining offline follow-up includes failure/recovery
 coverage and explicit deployment/arbitration design. These do not complete
 hardware gates.
+
+### Recorded Hardware Work
+
+- Read-only discovery and configuration snapshots exercised the connection and
+	22-parameter allowlist, but do not complete the Phase A robot contract.
+- Authorized changes set the translation dead zone from 10% to 14% and the
+	teleop timeout from 2.0 s to 1.0 s, with independent readback. The dead-zone
+	value persisted across one reboot; timeout persistence and physical watchdog
+	stopping remain unverified. Rotation dead zone was read as 5%.
+- Supervised forward, reverse, and curved trials produced motion. A -0.2 m/s
+	reverse request produced about -0.048 m/s reported steady velocity. Odometry
+	and stopping were not independently validated; stop delivery is unconfirmed.
+- Two firmware undock attempts timed out. A later separately authorized docked
+	forward pulse produced no observed movement; the latest recorded checks showed
+	Undocking and stationary telemetry, without confirmation of cancellation.
+	The current state is unknown. See [known issues](known_issues.md) and
+	[test results](amr_core/test/README.md).
+- The empty dock-at-origin map was parsed offline only. SDK file transfer exists,
+	but server support and map activation remain unverified; no map was uploaded.
 
 ### Initial Implementation Status
 
@@ -36,11 +57,12 @@ input validation, local asymmetric limit enforcement, and body-frame odometry
 twist. The loopback tests use only an in-process fake server bound to localhost,
 not a mobile robot. `unsafe_drive: true` remains unchanged.
 
-Eleven additional Nav2 pytest checks cover both launch descriptions, the parameter
+An earlier set of Nav2 pytest checks covered both launch descriptions, the parameter
 file default, nominal limits/rates, odometry topics, explicit Twist types, and
 actual installed smoother traffic/QoS in an isolated localhost ROS domain. Both
-controller and behavior output now enter the smoother; its reverse limit matches
-the driver's -0.2 m/s clamp. OPEN_LOOP feedback and existing acceleration/timeouts
+controller and behavior output enter the smoother. The current smoother reverse
+limit is -0.10 m/s, while the driver's clamp is -0.2 m/s; this mismatch requires
+review against measured robot capability. OPEN_LOOP feedback and existing acceleration/timeouts
 remain unchanged. Namespace arguments, relative topics, parameter overlays, and
 two-namespace command isolation are covered offline. Publisher arbitration, physical limits,
 and the smoother-to-driver end-to-end timeout budget remain open.
@@ -55,7 +77,7 @@ after an ordinary stop; silence does not replay the old target. Timeouts remain
 unchanged. Exclusive-source/break-before-make ownership is documented, not
 enforced by a new mux. Hardware/Nav2/RViz bringup accepts a shared namespace.
 
-The next software tranche adds confirmed startup mode gating and periodic
+The software includes confirmed startup mode gating and periodic
 `getSafeDrive` monitoring. Startup rejects missing, malformed, or mismatched
 confirmations. Runtime mismatch or lost confirmation invalidates movement,
 requests a best-effort stop, and latches the interface off until restart. It
@@ -83,9 +105,9 @@ expiry, or transport failure closes the socket with zero linger, discards local
 backlog, and latches movement off until restart. The adapter checks age before
 writes and retains the original staging timestamp. No libaria edits are needed.
 
-The local sender no longer uses `ArClientRatioDrive`; this relocation makes no
-additional vendor changes. Existing include-only edits in the libaria worktree
-were left untouched.
+The local sender no longer uses `ArClientRatioDrive`. Do not modify or reset the
+`libaria` submodule, including its existing local changes. Any required adaptation
+must be in a driver-local utility header that includes or inherits from libaria.
 An opt-in `aria_ratio_v1` inverse now separates permitted velocity limits from
 explicit full-throttle calibration, inverts throttle, and models direction- and
 measured-speed-dependent turning. Invalid/unresolved calibration fails startup;
@@ -102,13 +124,13 @@ by the robot. Already-delivered kernel/robot bytes cannot be recalled, and a TCP
 reset is not a cancellation acknowledgement. Do not deploy this tranche as a
 fully validated navigation or stopping solution without hardware acceptance.
 
-Still open: Phase A's live robot contract/baseline; hardware transport/deadman
+Still open: Phase A's remaining robot contract/baseline; hardware transport/deadman
 verification; real firmware mode-query semantics and manual arbitration; live
 calibration/firmware verification; additional failure/recovery tests; and all physical
 acceptance checks. Automatic reconnect is not implemented. Fresh post-stop input
 can resume after local stop submission, subject to server mode restrictions.
 
-Software verification completed in this workspace:
+An earlier offline software verification in this workspace used:
 
 ```bash
 colcon build --packages-select amr_core amr_nav2 --cmake-args -DBUILD_TESTING=ON
@@ -116,12 +138,14 @@ colcon test --packages-select amr_core amr_nav2
 colcon test-result --verbose
 ```
 
-Result: both affected packages build and all 66 GoogleTest cases plus six Nav2
+Historical result: both affected packages built and all 66 GoogleTest cases plus six Nav2
 pytest checks pass. Colcon reports 74 tests including wrappers, with zero errors,
 failures, or skipped tests. Runtime tests were restricted to localhost. The
 editor retains ROS include-path diagnostics, but the actual ROS compiler succeeds.
-Both hardware YAML configurations parse with `send_frequency: 20.0` and
-`unsafe_drive: true`. No commands were sent to a physical robot.
+Both hardware YAML configurations parsed with `send_frequency: 20.0` and
+`unsafe_drive: true`. That particular run used localhost only. All four registered
+core test groups also passed on 2026-10-28; see [test results](amr_core/test/README.md).
+These historical results do not replace a fresh run against the current tree.
 
 Goal: provide continuous, predictable Nav2 velocity control without introducing
 stop-mode transitions during normal driving, replaying stale commands, or
@@ -196,9 +220,13 @@ Do this before selecting conversion constants or changing robot configuration.
 - [ ] A2. Inspect the robot's advertised services and access permissions using a
 	read-only connection. Confirm `ratioDrive`, `stop`, `updateNumbers`, and any
 	safety-state/configuration queries actually available at runtime.
+	Read-only discovery has been exercised; a complete contract and map-upload
+	service/permission verification remain open.
 - [ ] A3. Export the effective teleop configuration through supported tooling.
 	Capture forward/reverse full-throttle speeds, rotation scaling at rest and in
 	motion, dead zones, acceleration/deceleration limits, and teleop timeout.
+	An allowlisted snapshot and the readbacks above provide partial evidence only;
+	firmware semantics, timeout persistence, and the complete contract remain open.
 - [ ] A4. Establish whether physical joystick and server teleop use separate
 	configurations or share them. Record deadman, mode-lock, and override rules.
 - [ ] A5. Capture a baseline ROS bag with command topics, odometry, TF, and robot
@@ -343,8 +371,8 @@ pose and twist conventions without changing topic or frame names unnecessarily.
 	open; current launch files are not an automatic arbitration mechanism.
 - [ ] F3. Align Nav2 forward/reverse, angular, and acceleration limits with
 	measured robot capability and the corrected mapping.
-	Nominal smoother reverse now matches -0.2 m/s; configured forward/angular
-	limits fit both hardware YAMLs. Real capability and acceleration remain open.
+	The current smoother reverse limit is -0.10 m/s versus the driver's -0.2 m/s
+	clamp. Real capability, alignment, and acceleration remain open.
 - [x] F4. Keep OPEN_LOOP smoothing initially to isolate driver changes. Evaluate
 	CLOSED_LOOP separately only after odometry quality and latency are verified.
 - [ ] F5. Choose command expiry from measured publishing jitter and an explicit
@@ -381,13 +409,14 @@ covered by that target; avoid creating a broad test framework.
 	`BUILD_TESTING`; keep production dependencies unchanged unless required.
 - [ ] T2. Test complete snapshots, newest-value replacement, configured rate,
 	delayed cycles without bursts, startup idle, and reconnection without replay.
-- [ ] T3. Test zero transitions, explicit-stop precedence, old-sample invalidation,
+- [x] T3. Test zero transitions, explicit-stop precedence, old-sample invalidation,
 	expiry boundaries, stop-send failures, and documented rearm behavior.
+	Stop-send failure is simulated in the policy test; robot receipt remains unverified.
 - [ ] T4. Test ROS-clock pause/jump independence and simulated ROS executor stalls
 	while networking continues. Expired movement must not continue being generated.
-- [ ] T5. Test NaN/infinity rejection, asymmetric limits, throttle, saturation,
+- [x] T5. Test NaN/infinity rejection, asymmetric limits, throttle, saturation,
 	dead-zone policy, angular mapping, and stale/invalid feedback.
-- [ ] T6. Test odometry decoding and child-frame twist with nonzero initial yaw.
+- [x] T6. Test odometry decoding and child-frame twist with nonzero initial yaw.
 - [ ] T7. Exercise teardown and concurrent mailbox access; use ThreadSanitizer
 	where supported, accounting for third-party-library limitations.
 - [x] T8. Build affected packages and run the focused test target first, then
@@ -460,7 +489,8 @@ testing interruptions or faults.
 	 Sections 9 and 10.
 
 - [ ] R1. Deliver small reviewable changes with tests; do not modify vendored
-	libaria. Keep additional transport behavior in driver-local helpers.
+	libaria or reset its existing changes. Put adaptations in driver-local utility
+	headers that include or inherit from libaria.
 - [ ] R2. Preserve the previous deployable build and robot configuration export.
 - [ ] R3. Define rollback as stopping the robot, restoring the prior software and
 	any approved robot settings, and repeating a low-speed connection/stop check.
