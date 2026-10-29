@@ -7,13 +7,23 @@
 #include <cctype>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace amr_core
 {
 class DebugInterface
 {
 public:
+  struct Fault
+  {
+    std::string type;
+    std::string name;
+    std::string short_description;
+    std::string long_description;
+  };
+
   static bool readMotorState(ArNetPacket* packet, std::uint8_t& state)
   {
     if (!packet || !packet->isValid() || packet->getDataLength() - packet->getDataReadLength() != 1)
@@ -32,6 +42,36 @@ public:
     if (!packet->isValid() || (value == 0 && packet->getDataLength() != packet->getDataReadLength()))
       return false;
     count = value;
+    return true;
+  }
+
+  static bool readFaults(ArNetPacket* packet, std::vector<Fault>& faults)
+  {
+    std::uint16_t count = 0;
+    if (!readFaultCount(packet, count) || count > 64) return false;
+    const auto* cursor = packet->getBuf() + packet->getReadLength();
+    const auto* end = cursor + packet->getDataLength() - packet->getDataReadLength();
+    std::vector<Fault> parsed;
+    std::set<std::string> names;
+    for (std::uint16_t index = 0; index < count; ++index)
+    {
+      Fault fault;
+      for (auto* field : { &fault.type, &fault.name, &fault.short_description, &fault.long_description })
+      {
+        const auto* terminator = std::find(cursor, end, '\0');
+        if (terminator == end) return false;
+        field->assign(cursor, terminator);
+        cursor = terminator + 1;
+      }
+      if (fault.name.empty() || fault.name.size() > 128 ||
+          std::any_of(fault.name.begin(), fault.name.end(), [](unsigned char ch) { return std::iscntrl(ch); }) ||
+          std::none_of(fault.name.begin(), fault.name.end(), [](unsigned char ch) { return !std::isspace(ch); }) ||
+          !names.insert(fault.name).second)
+        return false;
+      parsed.push_back(std::move(fault));
+    }
+    if (cursor != end) return false;
+    faults = std::move(parsed);
     return true;
   }
 

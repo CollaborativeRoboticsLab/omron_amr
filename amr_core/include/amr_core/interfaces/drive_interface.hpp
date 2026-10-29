@@ -2,6 +2,7 @@
 
 #include "amr_core/utils/drive_telemetry.hpp"
 #include "amr_core/interfaces/docking_interface.hpp"
+#include "amr_core/interfaces/debug_interface.hpp"
 
 #include <ArNetworking/ArNetworking.h>
 
@@ -14,12 +15,16 @@
 #include <algorithm>
 #include <stdexcept>
 #include <atomic>
+#include <cctype>
 #include <thread>
+#include <set>
 
 #include "rclcpp/rclcpp.hpp"
 #include <tf2_ros/transform_broadcaster.h>
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/empty.hpp"
+#include "std_srvs/srv/trigger.hpp"
+#include "amr_msgs/srv/acknowledge_fault.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -46,7 +51,8 @@ public:
     : node_(std::move(node)), docking_(std::move(docking)),
       update_callback_(this, &DriverInterface::handleUpdateNumbers),
       drive_callback_(this, &DriverInterface::handleDriveCycle),
-      mode_callback_(this, &DriverInterface::handleDriveMode)
+      mode_callback_(this, &DriverInterface::handleDriveMode),
+      faults_callback_(this, &DriverInterface::handleFaults)
   {
     if (!docking_)
     {
@@ -119,6 +125,27 @@ public:
     drive_throttle_pct_ = getOrDeclareParameter<double>("driver.drive_throttle_pct", 100.0);
     unsafe_drive_ = getOrDeclareParameter<bool>("driver.unsafe_drive", true);
     forward_departure_bypass_ = getOrDeclareParameter<bool>("docking.forward_departure_bypass", false);
+    const bool shutdown_enabled = getOrDeclareParameter<bool>("shutdown.enabled", false);
+    const bool fault_service_enabled = getOrDeclareParameter<bool>("fault.ros_service.enabled", false);
+    const auto fault_service_name = getOrDeclareParameter<std::string>("fault.ros_service.name", "acknowledge_fault");
+    fault_monitor_enabled_ = getOrDeclareParameter<bool>("fault.monitor.enabled", true);
+    auto_fault_ack_enabled_ = getOrDeclareParameter<bool>("fault.monitor.auto_acknowledge_enabled", false);
+    const auto allowed_faults = getOrDeclareParameter<std::vector<std::string>>("fault.auto_acknowledge_fault_list", {});
+    for (const auto& name : allowed_faults)
+    {
+      if (!validFaultName(name) || !auto_acknowledge_faults_.insert(name).second)
+        throw std::invalid_argument("Invalid or duplicate auto acknowledgement fault name");
+    }
+    if (auto_fault_ack_enabled_ && !fault_monitor_enabled_)
+      throw std::invalid_argument("Automatic fault acknowledgement requires fault monitoring");
+    if (shutdown_enabled && (!manage_docking_ || forward_departure_bypass_ ||
+        !getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false) ||
+        !getOrDeclareParameter<bool>("shutdown.exclusive_control_confirmed", false)))
+      throw std::invalid_argument("Shutdown requires managed contact docking and exclusive control confirmation");
+    if ((fault_service_enabled || auto_fault_ack_enabled_) && (!manage_docking_ || forward_departure_bypass_ ||
+        !getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false) ||
+        !getOrDeclareParameter<bool>("fault.ack.exclusive_control_confirmed", false)))
+      throw std::invalid_argument("Fault acknowledgement requires managed contact docking and exclusive control confirmation");
     if (forward_departure_bypass_ &&
       (!manage_docking_ || !getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false) ||
          !getOrDeclareParameter<bool>("docking.exclusive_control_confirmed", false)))
@@ -176,6 +203,19 @@ public:
     {
       throw std::runtime_error("Robot must advertise ratioDrive and stop for velocity control");
     }
+    if (shutdown_enabled && !client_.dataExists("shutdownRobot"))
+      throw std::runtime_error("Robot does not advertise shutdownRobot");
+    if ((fault_service_enabled || auto_fault_ack_enabled_) && !client_.dataExists("acknowledgeFault"))
+      throw std::runtime_error("Robot does not advertise acknowledgeFault");
+    if (fault_monitor_enabled_)
+    {
+      if (!client_.dataExists("getFaults") || !client_.addHandler("getFaults", &faults_callback_))
+      {
+        if (auto_fault_ack_enabled_) throw std::runtime_error("Automatic acknowledgement requires getFaults");
+        RCLCPP_ERROR(node_->get_logger(), "Fault monitoring unavailable: getFaults is not advertised");
+        fault_monitor_enabled_ = false;
+      }
+    }
     configureHandlers();
     if (manage_docking_)
     {
@@ -188,6 +228,43 @@ public:
     cycle_registered_ = true;
     client_.runAsync();
     network_started_ = true;
+    if (shutdown_enabled)
+    {
+      shutdown_service_ = node_->create_service<std_srvs::srv::Trigger>("shutdown_robot",
+          [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                 std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+            if (!docking_->reserveShutdown())
+            {
+              response->success = false;
+              response->message = "Shutdown requires fresh Docked and stationary feedback with no undock in progress";
+              return;
+            }
+            shutdown_requested_.store(true);
+            shutdown_pending_.store(true);
+            response->success = true;
+            response->message = "Accepted locally; robot shutdown is not acknowledged or confirmed";
+          });
+    }
+    if (fault_service_enabled)
+    {
+      fault_ack_service_ = node_->create_service<amr_msgs::srv::AcknowledgeFault>(fault_service_name,
+          [this](const std::shared_ptr<amr_msgs::srv::AcknowledgeFault::Request> request,
+                 std::shared_ptr<amr_msgs::srv::AcknowledgeFault::Response> response) {
+            const auto& name = request->fault_name;
+            std::lock_guard<std::mutex> lock(fault_ack_mutex_);
+            if (!validFaultName(name) || fault_ack_pending_ || shutdown_requested_.load() ||
+                !docking_->faultAcknowledgementEligible())
+            {
+              response->success = false;
+              response->message = "Named fault, fresh Docked and stationary feedback, and no pending operation required";
+              return;
+            }
+            pending_fault_name_ = name;
+            fault_ack_pending_ = true;
+            response->success = true;
+            response->message = "Accepted locally; fault acknowledgement and clearance are not confirmed";
+          });
+    }
     if (forward_departure_bypass_)
     {
       RCLCPP_WARN(node_->get_logger(), "Experimental forward dock-departure bypass enabled; one bounded attempt only");
@@ -199,6 +276,77 @@ public:
   }
 
 private:
+  static bool validFaultName(const std::string& name)
+  {
+    return !name.empty() && name.size() <= 128 &&
+           std::none_of(name.begin(), name.end(), [](unsigned char character) { return std::iscntrl(character); }) &&
+           std::any_of(name.begin(), name.end(), [](unsigned char character) { return !std::isspace(character); });
+  }
+
+  void handleFaults(ArNetPacket* packet)
+  {
+    if (!fault_query_pending_ || fault_monitor_failed_) return;
+    fault_query_pending_ = false;
+    std::vector<amr_core::DebugInterface::Fault> faults;
+    if (!amr_core::DebugInterface::readFaults(packet, faults))
+    {
+      if (!fault_reply_invalid_)
+        RCLCPP_ERROR(node_->get_logger(), "Invalid or unsupported fault reply; automatic acknowledgement inhibited");
+      fault_reply_invalid_ = true;
+      return;
+    }
+    fault_reply_invalid_ = false;
+    std::set<std::string> present;
+    for (const auto& fault : faults)
+    {
+      present.insert(fault.name);
+      if (active_faults_.count(fault.name) == 0)
+        RCLCPP_ERROR(node_->get_logger(), "Robot fault: %s", fault.name.c_str());
+    }
+    for (auto it = auto_acknowledged_faults_.begin(); it != auto_acknowledged_faults_.end();)
+    {
+      if (present.count(*it) == 0) it = auto_acknowledged_faults_.erase(it);
+      else ++it;
+    }
+    active_faults_ = std::move(present);
+    if (!auto_fault_ack_enabled_ || shutdown_requested_.load()) return;
+    for (const auto& fault : faults)
+    {
+      if (auto_acknowledge_faults_.count(fault.name) == 0 || auto_acknowledged_faults_.count(fault.name) != 0)
+        continue;
+      std::lock_guard<std::mutex> lock(fault_ack_mutex_);
+      if (fault_ack_pending_ || shutdown_requested_.load() || !docking_->faultAcknowledgementEligible()) continue;
+      pending_fault_name_ = fault.name;
+      fault_ack_pending_ = true;
+      auto_acknowledged_faults_.insert(fault.name);
+      RCLCPP_WARN(node_->get_logger(), "Automatic acknowledgement accepted locally for fault: %s", fault.name.c_str());
+      break;
+    }
+  }
+
+  void pollFaults(amr_core::DriveCommandPolicy::TimePoint now)
+  {
+    if (!fault_monitor_enabled_ || fault_monitor_failed_) return;
+    if (fault_query_pending_)
+    {
+      if (now - last_fault_query_ >= std::chrono::seconds(3))
+      {
+        fault_monitor_failed_ = true;
+        RCLCPP_ERROR(node_->get_logger(), "Fault query timed out; monitoring and automatic acknowledgement stopped");
+      }
+      return;
+    }
+    if (now - last_fault_query_ < std::chrono::seconds(1)) return;
+    last_fault_query_ = now;
+    if (!client_.requestOnce("getFaults", nullptr, true))
+    {
+      fault_monitor_failed_ = true;
+      RCLCPP_ERROR(node_->get_logger(), "Fault query not queued; monitoring and automatic acknowledgement stopped");
+      return;
+    }
+    fault_query_pending_ = true;
+  }
+
   /**
    * @brief Helper function to get a parameter value or declare it with a default if it doesn't exist.
    * @tparam T Parameter type.
@@ -498,6 +646,7 @@ private:
    */
   void cmdVelCB(const geometry_msgs::msg::Twist& msg)
   {
+    if (shutdown_requested_.load()) return;
     if (!mode_confirmed_.load())
     {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
@@ -571,6 +720,7 @@ private:
     {
       failDriveMode("Drive connection lost");
       if (manage_docking_) docking_->cycle(false);
+      discardPendingFaultAcknowledgement();
       return;
     }
 
@@ -588,6 +738,21 @@ private:
       }
     }
     if (manage_docking_) docking_->cycle(mode_confirmed_.load());
+    if (shutdown_requested_.load())
+    {
+      discardPendingFaultAcknowledgement();
+      docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
+        handleDriveCommands(now, readiness);
+      });
+      if (shutdown_pending_.exchange(false))
+      {
+        const bool queued = docking_->shutdownEligible() && client_.requestOnce("shutdownRobot", nullptr, true);
+        RCLCPP_WARN(node_->get_logger(), "Shutdown request %s; robot shutdown is not acknowledged",
+                    queued ? "queued locally" : "not queued");
+      }
+      return;
+    }
+    pollFaults(now);
     docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
       handleDriveCommands(now, readiness);
       if (now - last_ready_published_ >= std::chrono::milliseconds(50))
@@ -602,6 +767,32 @@ private:
         last_ready_published_ = now;
       }
     });
+    {
+      std::lock_guard<std::mutex> lock(fault_ack_mutex_);
+      if (fault_ack_pending_)
+      {
+        const bool queued = docking_->submitFaultAcknowledgement([&]() {
+          if (shutdown_requested_.load()) return false;
+          ArNetPacket packet;
+          packet.uByteToBuf(0);
+          packet.strToBuf(pending_fault_name_.c_str());
+          return client_.requestOnce("acknowledgeFault", &packet, true);
+        });
+        pending_fault_name_.clear();
+        fault_ack_pending_ = false;
+        RCLCPP_WARN(node_->get_logger(), "Named fault acknowledgement %s; clearance is not confirmed",
+                    queued ? "queued locally" : "not queued");
+      }
+    }
+  }
+
+  void discardPendingFaultAcknowledgement()
+  {
+    std::lock_guard<std::mutex> lock(fault_ack_mutex_);
+    if (!fault_ack_pending_) return;
+    pending_fault_name_.clear();
+    fault_ack_pending_ = false;
+    RCLCPP_WARN(node_->get_logger(), "Named fault acknowledgement not queued; driver stopped or disconnected");
   }
 
   void handleDriveCommands(amr_core::DriveCommandPolicy::TimePoint now,
@@ -615,6 +806,11 @@ private:
       command_policy_->requestStop();
     }
     const auto decision = command_policy_->poll(now);
+    if (shutdown_requested_.load() && decision.action == amr_core::DriveCommandPolicy::Action::Drive)
+    {
+      command_policy_->requestStop();
+      return;
+    }
     if (decision.action == amr_core::DriveCommandPolicy::Action::Drive &&
         ((forward_departure_bypass_ ?
               departure_finished_ || !readiness.departure_telemetry_fresh ||
@@ -703,6 +899,13 @@ private:
 
   // Libaria client and drive interface
   amr_core::DriveClient client_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr shutdown_service_;
+  std::atomic<bool> shutdown_requested_{ false };
+  std::atomic<bool> shutdown_pending_{ false };
+  rclcpp::Service<amr_msgs::srv::AcknowledgeFault>::SharedPtr fault_ack_service_;
+  std::mutex fault_ack_mutex_;
+  std::string pending_fault_name_;
+  bool fault_ack_pending_{ false };
   std::unique_ptr<amr_core::DriveCommandPolicy> command_policy_;
   std::unique_ptr<amr_core::DriveRatioMapping> ratio_mapping_;
   amr_core::DriveRatioMapping::Feedback body_feedback_;
@@ -714,6 +917,16 @@ private:
   ArFunctor1C<DriverInterface, ArNetPacket*> update_callback_;
   ArFunctorC<DriverInterface> drive_callback_;
   ArFunctor1C<DriverInterface, ArNetPacket*> mode_callback_;
+  ArFunctor1C<DriverInterface, ArNetPacket*> faults_callback_;
+  bool fault_monitor_enabled_{ false };
+  bool auto_fault_ack_enabled_{ false };
+  bool fault_query_pending_{ false };
+  bool fault_monitor_failed_{ false };
+  bool fault_reply_invalid_{ false };
+  amr_core::DriveCommandPolicy::TimePoint last_fault_query_{};
+  std::set<std::string> auto_acknowledge_faults_;
+  std::set<std::string> auto_acknowledged_faults_;
+  std::set<std::string> active_faults_;
   std::atomic<bool> mode_confirmed_{ false };
   bool mode_failed_{ false };
   bool mode_query_pending_{ false };

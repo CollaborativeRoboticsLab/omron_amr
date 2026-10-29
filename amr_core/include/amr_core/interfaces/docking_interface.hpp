@@ -70,7 +70,7 @@ public:
     std::lock_guard<std::mutex> lock(operation_mutex_);
     const auto now = Clock::now();
     if (!std::isfinite(max_undocking_time) || max_undocking_time <= 0.0 ||
-      !supported_ || reserved_ || !mode_ready_ || !confirm_contact || !confirm_exclusive ||
+      !supported_ || reserved_ || shutdown_reserved_ || !mode_ready_ || !confirm_contact || !confirm_exclusive ||
         !infoFresh(now) || info_.forced || info_.shutdown_countdown != 0 ||
         info_.state != DockInfo::State::Docked || !stationary(now) || readiness().state == State::Failed)
     {
@@ -82,6 +82,39 @@ public:
     operation_timeout_sec_ = std::min(max_undocking_time, undock_timeout_sec_);
     reserved_ = true;
     return true;
+  }
+
+  bool reserveShutdown()
+  {
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    const auto now = Clock::now();
+    if (shutdown_reserved_ || !supported_ || reserved_ || !contact_confirmed_ || !infoFresh(now) ||
+        info_.forced || info_.shutdown_countdown != 0 || info_.state != DockInfo::State::Docked ||
+        !stationary(now) || readiness(now).state != State::Docked)
+      return false;
+    shutdown_reserved_ = true;
+    return true;
+  }
+
+  bool shutdownEligible()
+  {
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    const auto now = Clock::now();
+    return shutdown_reserved_ && supported_ && !reserved_ && infoFresh(now) && !info_.forced &&
+           info_.shutdown_countdown == 0 && info_.state == DockInfo::State::Docked && stationary(now) &&
+           readiness(now).state == State::Docked;
+  }
+
+  bool faultAcknowledgementEligible()
+  {
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    return faultAcknowledgementEligibleLocked(Clock::now());
+  }
+
+  bool submitFaultAcknowledgement(const std::function<bool()>& submit)
+  {
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    return faultAcknowledgementEligibleLocked(Clock::now()) && submit();
   }
 
   void beginUndock()
@@ -336,6 +369,13 @@ public:
   }
 
 private:
+  bool faultAcknowledgementEligibleLocked(TimePoint now)
+  {
+    return supported_ && !reserved_ && !shutdown_reserved_ && contact_confirmed_ && infoFresh(now) &&
+           !info_.forced && info_.shutdown_countdown == 0 && info_.state == DockInfo::State::Docked &&
+           stationary(now) && readiness(now).state == State::Docked;
+  }
+
   bool departureTelemetryFresh(TimePoint now) const
   {
     return departure_contact_confirmed_ && departure_have_telemetry_ && now >= departure_telemetry_received_ &&
@@ -430,6 +470,7 @@ private:
   unsigned long long generation_{ 0 };
   TimePoint departure_telemetry_received_{};
   bool departure_contact_confirmed_{ false }, departure_have_telemetry_{ false }, departure_stationary_{ false };
+  bool shutdown_reserved_{ false };
   DriveClient* client_{ nullptr };
   ArFunctor1C<DockingInterface, ArNetPacket*> info_callback_;
   std::mutex operation_mutex_;

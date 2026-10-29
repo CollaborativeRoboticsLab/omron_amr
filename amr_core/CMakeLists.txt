@@ -16,6 +16,7 @@ find_package(rclcpp_action REQUIRED)
 find_package(amr_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
@@ -41,6 +42,7 @@ ament_target_dependencies(${PROJECT_NAME}
   rclcpp_action
   tf2_ros
   std_msgs
+  std_srvs
   nav_msgs
   sensor_msgs
   geometry_msgs
@@ -86,7 +88,7 @@ if(BUILD_TESTING)
     test/test_drive_tcp_sender.cpp
   )
   ament_target_dependencies(test_drive_interface
-    rclcpp rclcpp_action nav2_msgs tf2_ros tf2_msgs std_msgs nav_msgs geometry_msgs nav2_velocity_smoother
+    rclcpp rclcpp_action amr_msgs nav2_msgs tf2_ros tf2_msgs std_msgs std_srvs nav_msgs geometry_msgs nav2_velocity_smoother
   )
   target_link_libraries(test_drive_interface libaria::ArNetworking nlohmann_json::nlohmann_json)
   target_compile_definitions(test_drive_interface PRIVATE AMR_CORE_EXECUTABLE="$<TARGET_FILE:amr_core>")

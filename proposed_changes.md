@@ -9,12 +9,11 @@ been performed, but hardware acceptance remains incomplete.
 
 ### Robot Work Deferred
 
-The robot is not connected to this machine. Further live configuration capture,
-firmware/service verification, velocity calibration, joystick arbitration,
-physical stopping tests, and Nav2 hardware acceptance are deferred until the
-robot and a supervised test session are available. Keep their checklist items
-open; do not substitute archive defaults for live evidence or retry connections
-as part of offline work.
+The robot was reconnected for read-only inspection. Further live configuration
+capture, firmware verification, velocity calibration, joystick arbitration,
+physical stopping tests, and Nav2 hardware acceptance remain open. Do not
+substitute archive defaults for live evidence or perform movement without a
+supervised test session and separate approval.
 
 Keep `ratio_mapping: legacy`, `calibration.confirmed: false`, and
 `unsafe_drive: true` unchanged. Resume with read-only configuration capture
@@ -41,10 +40,38 @@ hardware gates.
 - Two firmware undock attempts timed out. A later separately authorized docked
 	forward pulse produced no observed movement; the latest recorded checks showed
 	Undocking and stationary telemetry, without confirmation of cancellation.
-	The current state is unknown. See [known issues](known_issues.md) and
+	A later check reported Docked; the undocking cause remains unknown. See [known issues](known_issues.md) and
 	[test results](amr_core/test/README.md).
-- The empty dock-at-origin map was parsed offline only. SDK file transfer exists,
-	but server support and map activation remain unverified; no map was uploaded.
+- The empty dock-at-origin map parsed offline. Read-only server discovery found
+	`putFile`, `putFileInterleaved`, `processMapChanges`, and `getMapName`; the
+	active map was `uc_room1.map`. Transfer permission, upload, and activation
+	remain unverified; no map was uploaded. A read-only server snapshot was saved
+	privately and matched the supplied original byte-for-byte (721600 bytes).
+	A separate map interface and default-off ROS active-map query are implemented;
+	upload and activation are not implemented. After an operator reboot, docking
+	status reported Docked and telemetry was stationary. The fault response
+	provisionally indicated `IrregularShutdown` but did not match the advertised
+	format. The operator confirmed the fault in MobilePlanner.
+- Read-only discovery found `shutdownRobot` and `acknowledgeFault`; no robot
+	reboot command was identified among shutdown/reboot/restart service names.
+	Default-off, docked/stationary-gated ROS shutdown and named-fault
+	acknowledgement requests have localhost coverage. On 2026-10-29, one authorized
+	`IrregularShutdown` acknowledgement was locally queued through the ROS service;
+	a subsequent valid fault query reported zero faults. The robot remained Docked
+	and stationary. Physical shutdown remains unverified.
+- Fault monitoring and opt-in automatic acknowledgement are implemented and
+	covered by localhost tests. The LD250 allowlist includes `IrregularShutdown`,
+	but automatic acknowledgement is disabled. The observed nonempty fault reply
+	contains undocumented trailing bytes and is rejected, so automatic fault
+	identification and acknowledgement on this firmware remain unverified.
+	The read-only debug probe now prints unexpected trailing byte values for
+	future diagnosis. The robot advertises `getFaultsWithFlags` as a read-only
+	query, but its nonempty response format has not been verified.
+- On 2026-10-29, a temporary driver connected with safe drive and automatic
+	acknowledgement disabled. A custom fault service name was available and an
+	empty request was rejected. No fault-query timeout was logged; follow-up
+	read-only queries reported zero faults, Docked, and stationary telemetry.
+	No acknowledgement or movement command was sent in this test.
 
 ### Initial Implementation Status
 

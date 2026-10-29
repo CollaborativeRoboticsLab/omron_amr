@@ -18,6 +18,8 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 
 #include "amr_core/interfaces/drive_interface.hpp"
+#include "amr_core/interfaces/map_interface.hpp"
+#include "amr_core/utils/robot_session.hpp"
 
 using namespace std::chrono_literals;
 
@@ -53,6 +55,11 @@ protected:
     , odom_callback_(this, &DriverInterfaceLoopbackTest::sendOdometry)
     , docking_callback_(this, &DriverInterfaceLoopbackTest::sendDocking)
     , undock_callback_(this, &DriverInterfaceLoopbackTest::recordUndock)
+    , shutdown_callback_(this, &DriverInterfaceLoopbackTest::recordShutdown)
+    , fault_ack_callback_(this, &DriverInterfaceLoopbackTest::recordFaultAcknowledgement)
+    , faults_callback_(this, &DriverInterfaceLoopbackTest::sendFaults)
+    , map_name_callback_(this, &DriverInterfaceLoopbackTest::sendMapName)
+    , map_callback_(this, &DriverInterfaceLoopbackTest::sendMap)
   {
   }
 
@@ -147,6 +154,85 @@ protected:
     ++undock_requests_;
     fake_docking_state_ = 0;
     changed_.notify_all();
+  }
+
+  void recordShutdown(ArServerClient*, ArNetPacket*)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++shutdown_requests_;
+    changed_.notify_all();
+  }
+
+  void enableShutdownBackend()
+  {
+    ASSERT_TRUE(server_.addData("shutdownRobot", "record shutdown", &shutdown_callback_, "none", "none"));
+  }
+
+  void recordFaultAcknowledgement(ArServerClient*, ArNetPacket* packet)
+  {
+    const auto acknowledge_all = packet->bufToUByte();
+    const auto name = packet->bufToString();
+    std::lock_guard<std::mutex> lock(mutex_);
+    fault_ack_requests_.emplace_back(acknowledge_all, name);
+    changed_.notify_all();
+  }
+
+  void enableFaultAcknowledgementBackend()
+  {
+    ASSERT_TRUE(server_.addData("acknowledgeFault", "record fault acknowledgement", &fault_ack_callback_, "", "none"));
+  }
+
+  void sendFaults(ArServerClient* client, ArNetPacket*)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++fault_queries_;
+    ArNetPacket packet;
+    packet.uByte2ToBuf(static_cast<unsigned short>(fake_faults_.size()));
+    for (const auto& name : fake_faults_)
+    {
+      packet.strToBuf("Fault_ClearedOnAcknowledgement");
+      packet.strToBuf(name.c_str());
+      packet.strToBuf("description");
+      packet.strToBuf("details");
+    }
+    if (fault_trailing_bytes_)
+      packet.uByteToBuf(1);
+    client->sendPacketTcp(&packet);
+    changed_.notify_all();
+  }
+
+  void enableAutomaticFaultAcknowledgement()
+  {
+    enableFaultAcknowledgementBackend();
+    ASSERT_TRUE(server_.addData("getFaults", "query faults", &faults_callback_, "none", "faults"));
+    node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
+    node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+    node_->declare_parameter<bool>("fault.monitor.auto_acknowledge_enabled", true);
+    node_->declare_parameter<std::vector<std::string>>("fault.auto_acknowledge_fault_list", { "IrregularShutdown" });
+  }
+
+  void sendMapName(ArServerClient* client, ArNetPacket*)
+  {
+    ArNetPacket packet;
+    packet.strToBuf("fixture.map");
+    client->sendPacketTcp(&packet);
+  }
+
+  void sendMap(ArServerClient* client, ArNetPacket*)
+  {
+    for (const auto* line : { "2D-Map", "DATA", "" })
+    {
+      ArNetPacket packet;
+      packet.strToBuf(line);
+      client->sendPacketTcp(&packet);
+    }
+  }
+
+  void enableMapBackend()
+  {
+    server_.enforceProtocolVersion("6MTX");
+    ASSERT_TRUE(server_.addData("getMapName", "active map", &map_name_callback_, "none", "string"));
+    ASSERT_TRUE(server_.addData("getMap", "map stream", &map_callback_, "none", "lines"));
   }
 
   void configureCalibration(bool confirmed = true)
@@ -463,6 +549,11 @@ protected:
   ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> odom_callback_;
   ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> docking_callback_;
   ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> undock_callback_;
+  ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> shutdown_callback_;
+  ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> fault_ack_callback_;
+  ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> faults_callback_;
+  ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> map_name_callback_;
+  ArFunctor2C<DriverInterfaceLoopbackTest, ArServerClient*, ArNetPacket*> map_callback_;
   int fake_docking_state_{ 2 };
   bool server_started_{ false };
   pid_t core_process_{ -1 };
@@ -470,6 +561,11 @@ protected:
   rclcpp::Node::SharedPtr node_;
   std::shared_ptr<amr_core::DockingInterface> docking_;
   int undock_requests_{ 0 };
+  int shutdown_requests_{ 0 };
+  std::vector<std::pair<std::uint8_t, std::string>> fault_ack_requests_;
+  std::vector<std::string> fake_faults_;
+  int fault_queries_{ 0 };
+  bool fault_trailing_bytes_{ false };
   std::unique_ptr<DriverInterface> driver_;
   std::shared_ptr<nav2_velocity_smoother::VelocitySmoother> smoother_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr upstream_;
@@ -682,6 +778,316 @@ TEST_F(DriverInterfaceLoopbackTest, UndockedReadinessRemainsFreshDuringNormalMot
   ASSERT_TRUE(waitWithExecutor([this]() { return docking_->readiness().state == Docking::State::Ready; }));
 }
 
+TEST_F(DriverInterfaceLoopbackTest, MapInterfaceReadsStableSnapshot)
+{
+  enableMapBackend();
+  amr_core::RobotSession session;
+  ASSERT_TRUE(session.connect({ "127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", "6MTX" }));
+  amr_core::MapInterface map(session.client());
+  const auto snapshot = map.snapshot();
+  EXPECT_EQ(snapshot.name, "fixture.map");
+  EXPECT_EQ(snapshot.content, "2D-Map\nDATA\n");
+}
+
+TEST_F(DriverInterfaceLoopbackTest, CoreNodeMapServerUsesConfiguredServiceName)
+{
+  enableMapBackend();
+  const auto port_argument = std::string("robot.port:=") + std::to_string(server_.getTcpPort());
+  core_process_ = fork();
+  ASSERT_GE(core_process_, 0);
+  if (core_process_ == 0)
+  {
+    execl(AMR_CORE_EXECUTABLE, AMR_CORE_EXECUTABLE, "--ros-args", "-r", "__ns:=/map_test", "-p",
+          "robot.ip:=127.0.0.1", "-p", port_argument.c_str(), "-p", "robot.user:=loopback", "-p",
+          "robot.protocol:=6MTX", "-p", "status.publish:=false", "-p", "laser.main_laser.enabled:=false", "-p",
+          "driver.publish_robot_tf:=false", "-p", "map.ros_service.enabled:=true", "-p",
+          "map.ros_service.name:=custom_active_map", static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  auto service = node_->create_client<std_srvs::srv::Trigger>("/map_test/custom_active_map");
+  ASSERT_TRUE(waitWithExecutor([&service]() { return service->service_is_ready(); }));
+  auto result = service->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+  const auto response = result.get();
+  EXPECT_TRUE(response->success);
+  EXPECT_EQ(response->message, "fixture.map");
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementIsDisabledByDefault)
+{
+  initializeDriver();
+  auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
+  EXPECT_FALSE(service->wait_for_service(200ms));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultMonitorAcknowledgesOnlyAllowlistedFaultOnce)
+{
+  enableAutomaticFaultAcknowledgement();
+  fake_faults_ = { "IrregularShutdown", "OtherFault" };
+  initializeDockingBackend();
+  auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
+  EXPECT_FALSE(service->wait_for_service(200ms));
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_ack_requests_.size() == 1 && fault_queries_ >= 4;
+  }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  ASSERT_EQ(fault_ack_requests_.size(), 1u);
+  EXPECT_EQ(fault_ack_requests_.front().first, 0);
+  EXPECT_EQ(fault_ack_requests_.front().second, "IrregularShutdown");
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultMonitorRejectsUndocumentedTrailingBytes)
+{
+  enableAutomaticFaultAcknowledgement();
+  fake_faults_ = { "IrregularShutdown" };
+  fault_trailing_bytes_ = true;
+  initializeDockingBackend();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_queries_ >= 3;
+  }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(fault_ack_requests_.empty());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultMonitorAutomaticAcknowledgementRequiresOptIn)
+{
+  node_->declare_parameter<bool>("fault.monitor.auto_acknowledge_enabled", true);
+  EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
+               std::invalid_argument);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRequiresConfirmation)
+{
+  node_->declare_parameter<bool>("fault.ros_service.enabled", true);
+  EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
+               std::invalid_argument);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRequiresAdvertisedCommand)
+{
+  node_->declare_parameter<bool>("fault.ros_service.enabled", true);
+  node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  driver_ = std::make_unique<DriverInterface>(node_);
+  EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
+               std::runtime_error);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementSendsOnlyNamedFault)
+{
+  enableFaultAcknowledgementBackend();
+  node_->declare_parameter<bool>("fault.ros_service.enabled", true);
+  node_->declare_parameter<std::string>("fault.ros_service.name", "custom_acknowledge_fault");
+  node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("custom_acknowledge_fault");
+  ASSERT_TRUE(service->wait_for_service(1s));
+  for (const std::string& name : std::vector<std::string>{ "", "   ", "bad\nname", std::string(129, 'a') })
+  {
+    auto request = std::make_shared<amr_msgs::srv::AcknowledgeFault::Request>();
+    request->fault_name = name;
+    auto result = service->async_send_request(request);
+    ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+    EXPECT_FALSE(result.get()->success);
+  }
+  auto request = std::make_shared<amr_msgs::srv::AcknowledgeFault::Request>();
+  request->fault_name = "IrregularShutdown";
+  auto result = service->async_send_request(request);
+  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+  ASSERT_TRUE(result.get()->success);
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !fault_ack_requests_.empty();
+  }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  ASSERT_EQ(fault_ack_requests_.size(), 1u);
+  EXPECT_EQ(fault_ack_requests_[0].first, 0);
+  EXPECT_EQ(fault_ack_requests_[0].second, "IrregularShutdown");
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRejectsStaleTelemetry)
+{
+  enableFaultAcknowledgementBackend();
+  node_->declare_parameter<bool>("fault.ros_service.enabled", true);
+  node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_odometry_ = true;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return !docking_->readiness().departure_telemetry_fresh; }));
+  auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
+  ASSERT_TRUE(service->wait_for_service(1s));
+  auto request = std::make_shared<amr_msgs::srv::AcknowledgeFault::Request>();
+  request->fault_name = "IrregularShutdown";
+  auto result = service->async_send_request(request);
+  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(result.get()->success);
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(fault_ack_requests_.empty());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRejectsMovingOrReservedUndock)
+{
+  enableFaultAcknowledgementBackend();
+  node_->declare_parameter<bool>("fault.ros_service.enabled", true);
+  node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
+  ASSERT_TRUE(service->wait_for_service(1s));
+  auto request = std::make_shared<amr_msgs::srv::AcknowledgeFault::Request>();
+  request->fault_name = "ExampleFault";
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    telemetry_.forward_mm_s = 100;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return !docking_->readiness().departure_stationary; }));
+  auto moving = service->async_send_request(request);
+  ASSERT_TRUE(waitWithExecutor([&moving]() { return moving.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(moving.get()->success);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    telemetry_.forward_mm_s = 0;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->readiness().departure_stationary; }));
+  ASSERT_TRUE(docking_->reserveUndock(true, true));
+  auto reserved = service->async_send_request(request);
+  ASSERT_TRUE(waitWithExecutor([&reserved]() { return reserved.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(reserved.get()->success);
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(fault_ack_requests_.empty());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRejectsReservedShutdown)
+{
+  enableFaultAcknowledgementBackend();
+  enableShutdownBackend();
+  node_->declare_parameter<bool>("fault.ros_service.enabled", true);
+  node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("shutdown.enabled", true);
+  node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
+  auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
+  ASSERT_TRUE(shutdown->wait_for_service(1s));
+  ASSERT_TRUE(service->wait_for_service(1s));
+  auto shutdown_result = shutdown->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  ASSERT_TRUE(
+      waitWithExecutor([&shutdown_result]() { return shutdown_result.wait_for(0s) == std::future_status::ready; }));
+  ASSERT_TRUE(shutdown_result.get()->success);
+  auto request = std::make_shared<amr_msgs::srv::AcknowledgeFault::Request>();
+  request->fault_name = "ExampleFault";
+  auto result = service->async_send_request(request);
+  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(result.get()->success);
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(fault_ack_requests_.empty());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownRequiresConfirmationAtStartup)
+{
+  node_->declare_parameter<bool>("shutdown.enabled", true);
+  EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
+               std::invalid_argument);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownIsDisabledByDefault)
+{
+  initializeDriver();
+  auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
+  EXPECT_FALSE(shutdown->wait_for_service(200ms));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownRequiresAdvertisedServerCommand)
+{
+  node_->declare_parameter<bool>("shutdown.enabled", true);
+  node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  driver_ = std::make_unique<DriverInterface>(node_);
+  EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
+               std::runtime_error);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownIsOneShotAndBlocksUndocking)
+{
+  enableShutdownBackend();
+  node_->declare_parameter<bool>("shutdown.enabled", true);
+  node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
+  ASSERT_TRUE(shutdown->wait_for_service(1s));
+  auto first = shutdown->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  ASSERT_TRUE(waitWithExecutor([&first]() { return first.wait_for(0s) == std::future_status::ready; }));
+  ASSERT_TRUE(first.get()->success);
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return shutdown_requests_ == 1;
+  }));
+  EXPECT_FALSE(docking_->reserveUndock(true, true));
+  auto second = shutdown->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  ASSERT_TRUE(waitWithExecutor([&second]() { return second.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(second.get()->success);
+  auto stop = node_->create_publisher<std_msgs::msg::Empty>("/drive_test/stop", 10);
+  ASSERT_TRUE(waitWithExecutor([&stop]() { return stop->get_subscription_count() > 0; }));
+  stop->publish(std_msgs::msg::Empty{});
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_EQ(shutdown_requests_, 1);
+  EXPECT_EQ(undock_requests_, 0);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownRejectsMovingTelemetry)
+{
+  enableShutdownBackend();
+  node_->declare_parameter<bool>("shutdown.enabled", true);
+  node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    telemetry_.forward_mm_s = 100;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return !docking_->readiness().departure_stationary; }));
+  auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
+  ASSERT_TRUE(shutdown->wait_for_service(1s));
+  auto result = shutdown->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(result.get()->success);
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_EQ(shutdown_requests_, 0);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownRejectsStaleTelemetry)
+{
+  enableShutdownBackend();
+  node_->declare_parameter<bool>("shutdown.enabled", true);
+  node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_odometry_ = true;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return !docking_->readiness().departure_telemetry_fresh; }));
+  auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
+  ASSERT_TRUE(shutdown->wait_for_service(1s));
+  auto result = shutdown->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_FALSE(result.get()->success);
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_EQ(shutdown_requests_, 0);
+}
+
 TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReservationAndSettledDeparture)
 {
   initializeDockingBackend();
@@ -754,7 +1160,7 @@ TEST_F(DriverInterfaceLoopbackTest, DockedDepartureBypassAllowsOnlyBoundedForwar
   node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
   node_->declare_parameter<bool>("docking.exclusive_control_confirmed", true);
   initializeDockingBackend();
-  for (const auto& command : std::vector<std::pair<double, double>>{{-0.2, 0.0}, {0.2, 0.1}, {0.4, 0.0}})
+  for (const auto& command : std::vector<std::pair<double, double>>{ { -0.2, 0.0 }, { 0.2, 0.1 }, { 0.4, 0.0 } })
   {
     publish(command.first, command.second);
     const auto blocked = std::chrono::steady_clock::now();

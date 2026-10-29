@@ -8,10 +8,13 @@
 #include <stdexcept>
 #include <nav2_msgs/action/undock_robot.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 #include "amr_core/interfaces/status_interface.hpp"
 #include "amr_core/interfaces/laser_interface.hpp"
 #include "amr_core/interfaces/drive_interface.hpp"
+#include "amr_core/interfaces/map_interface.hpp"
+#include "amr_core/utils/robot_session.hpp"
 
 class CoreNode : public rclcpp::Node
 {
@@ -33,6 +36,40 @@ public:
     publish_status_ = getOrDeclareParameter<bool>("status.publish", true);
     publish_main_laser_ = getOrDeclareParameter<bool>("laser.main_laser.enabled", true);
     publish_low_laser_ = getOrDeclareParameter<bool>("laser.low_laser.enabled", false);
+
+    if (getOrDeclareParameter<bool>("map.ros_service.enabled", false))
+    {
+      try
+      {
+        map_session_ = std::make_unique<amr_core::RobotSession>();
+        if (!map_session_->connect({ host_, port_, user_, password_, protocol_ }) ||
+            !map_session_->client().dataExists("getMapName"))
+          throw std::runtime_error("Connected getMapName service required");
+        map_interface_ = std::make_unique<amr_core::MapInterface>(map_session_->client());
+        const auto service_name = getOrDeclareParameter<std::string>("map.ros_service.name", "map/get_active_map");
+        map_server_ = create_service<std_srvs::srv::Trigger>(service_name,
+            [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                   std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+              std::lock_guard<std::mutex> lock(map_mutex_);
+              try
+              {
+                response->message = map_interface_->getName();
+                response->success = true;
+              }
+              catch (const std::exception&)
+              {
+                response->success = false;
+                response->message = "Active map query failed";
+              }
+            });
+      }
+      catch (const std::exception& ex)
+      {
+        map_interface_.reset();
+        map_session_.reset();
+        RCLCPP_ERROR(this->get_logger(), "Map interface initialization failed: %s", ex.what());
+      }
+    }
 
     if (publish_status_)
     {
@@ -167,6 +204,11 @@ private:
   }
 
 private:
+  std::unique_ptr<amr_core::RobotSession> map_session_;
+  std::unique_ptr<amr_core::MapInterface> map_interface_;
+  std::mutex map_mutex_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_server_;
+
   // Status information
   std::shared_ptr<StatusInterface> status_interface_;
 

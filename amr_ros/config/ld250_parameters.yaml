@@ -37,6 +37,15 @@ amr_core:
         range_min: 0.02
         range_max: 4.0
 
+    fault:
+      auto_acknowledge_fault_list: ["IrregularShutdown"]
+      ros_service:
+        enabled: false
+        name: "acknowledge_fault"
+      monitor:
+        enabled: true
+        auto_acknowledge_enabled: false
+
     driver:
       odom_topic: "odom"
       cmd_vel_topic: "cmd_vel"

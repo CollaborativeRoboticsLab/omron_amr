@@ -23,6 +23,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Location.msg"
   "msg/Status.msg"
+  "srv/AcknowledgeFault.srv"
 )
 # uncomment the following section in order to fill in
 # further dependencies manually.
