@@ -13,7 +13,7 @@ streams. Python tests cover captured data and pulse-runner guards. All four
 registered core test groups passed on 2026-10-30 after the loopback tests were
 split by interface. The aggregate target was then renamed to
 `test_robot_interface`, rebuilt and passed separately. The test executable
-contains 117 cases, including 69 loopback cases. Offline tests do not establish
+contains 114 cases, including 66 loopback cases. Offline tests do not establish
 physical motion, firmware behavior or safety performance.
 
 The aggregate target includes drive, configuration, map, debug and docking
@@ -129,21 +129,6 @@ physical stop; investigate uncertain outcomes before any further test.
 The driver requests its configured `unsafe_drive` mode at startup. Docking
 readiness and the `drive_ready` topic are not protective safety functions.
 Firmware undocking remains unresolved; see [known issues](../../known_issues.md).
-
-The experimental dock-departure bypass is default-off and has been tested only
-with a fake server. It requires fresh Docked feedback, stationary telemetry,
-and explicit contact-dock and exclusive-control confirmations. It permits one
-straight-forward request of 0.2 m/s for at most 0.5 s, then latches off until
-restart; the undock action is disabled in this mode. Direct departure support by
-the installed firmware, actual speed, and stop delivery are unverified. Only
-after separate approval for this specific motion, a single 0.1 s test is:
-
-```bash
-source install/setup.bash
-python3 src/omron_amr/amr_core/test/drive_pulse.py --execute \
-	--scenario forward --duration-sec 0.1 --confirm-contact-dock-no-cable \
-	--forward-departure-bypass --confirm-exclusive-control
-```
 
 ## Distance and Velocity Calibration
 

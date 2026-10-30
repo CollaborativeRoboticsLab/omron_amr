@@ -114,7 +114,7 @@ public:
     {
       driver_ = std::make_shared<DriverInterface>(this->shared_from_this());
       driver_->initialize(host_, port_, user_, password_, protocol_);
-      if (!driver_->forwardDepartureBypassEnabled()) initializeUndockAction();
+      initializeUndockAction();
     }
     catch (const std::exception& ex)
     {

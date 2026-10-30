@@ -1,5 +1,7 @@
 import importlib.util
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -103,15 +105,10 @@ def test_contact_dock_must_be_explicitly_confirmed():
     drive_pulse.require_contact_dock(True)
 
 
-@pytest.mark.parametrize(('scenario', 'duration', 'confirmed'), [
-    ('reverse', 0.5, True), ('forward-left', 0.5, True), ('forward', 0.51, True),
-    ('forward', 0.0, True), ('forward', float('nan'), True), ('forward', 0.5, False),
-])
-def test_departure_rejects_unapproved_request(scenario, duration, confirmed):
-    with pytest.raises(ValueError):
-        drive_pulse.departure_command(scenario, duration, confirmed)
-
-
-def test_departure_uses_bounded_forward_command():
-    assert drive_pulse.departure_command('forward', 0.1, True) == (0.2, 0.0)
+def test_removed_departure_option_is_rejected():
+    result = subprocess.run([sys.executable, str(Path(__file__).with_name('drive_pulse.py')),
+                             '--execute', '--scenario', 'forward', '--confirm-contact-dock-no-cable',
+                             '--forward-departure-bypass'], capture_output=True, text=True, check=False)
+    assert result.returncode == 2
+    assert 'unrecognized arguments: --forward-departure-bypass' in result.stderr
 
