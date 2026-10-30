@@ -148,6 +148,8 @@ protected:
   void sendDocking(ArServerClient* client, ArNetPacket*)
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (suppress_docking_replies_)
+      return;
     ArNetPacket packet;
     packet.uByteToBuf(fake_docking_state_);
     packet.uByteToBuf(0);
@@ -160,6 +162,7 @@ protected:
     std::lock_guard<std::mutex> lock(mutex_);
     ++undock_requests_;
     fake_docking_state_ = 0;
+    suppress_docking_replies_ = suppress_docking_after_undock_;
     changed_.notify_all();
   }
 
@@ -615,6 +618,8 @@ protected:
   std::string uploaded_map_;
   bool corrupt_map_readback_{ false };
   int fake_docking_state_{ 2 };
+  bool suppress_docking_replies_{ false };
+  bool suppress_docking_after_undock_{ false };
   bool server_started_{ false };
   pid_t core_process_{ -1 };
   bool executor_added_{ false };

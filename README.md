@@ -29,7 +29,7 @@ cd omron_ws/src
 
 Install dependencies
 ```sh
-sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-toolbox ros-humble-teleop-twist-joy ros-humble-joy
+sudo apt install ros-jazzy-navigation2 ros-jazzy-nav2-bringup ros-jazzy-slam-toolbox ros-jazzy-teleop-twist-joy ros-jazzy-joy
 ```
 
 Clone the repositories into the `src` folder by
@@ -62,6 +62,12 @@ ros2 launch amr_ros ld250.launch.py
 ```
 
 ### Start Nav2 SLAM and open the Nav2 RViz view for mapping
+
+The SLAM launch publishes a map with a 1 m unknown border on `map`; the
+unmodified SLAM grid is available on `slam_map_raw`. The default Nav2 planner
+does not plan through unknown space in SLAM mode. Padding does not add obstacle
+observations, and does not establish that navigation is safe. Custom SLAM
+parameters must use the default `/map` topic for this padding pipeline.
 
 ```sh
 source install/setup.bash

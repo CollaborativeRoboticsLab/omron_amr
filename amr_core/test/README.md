@@ -13,8 +13,14 @@ streams. Python tests cover captured data and pulse-runner guards. All four
 registered core test groups passed on 2026-10-30 after the loopback tests were
 split by interface. The aggregate target was then renamed to
 `test_robot_interface`, rebuilt and passed separately. The test executable
-contains 114 cases, including 66 loopback cases. Offline tests do not establish
+contains 115 cases, including 67 loopback cases. Offline tests do not establish
 physical motion, firmware behavior or safety performance.
+
+A loopback test withholds docking replies after undocking, then resumes them;
+the driver requests stop and retains the failure after fresh Undocked feedback.
+Stale-feedback failure messages include poll timing captured at failure. The
+timing is relative to the most recently queued query and does not identify which
+request produced a reply. This does not explain the observed robot feedback gap.
 
 The aggregate target includes drive, configuration, map, debug and docking
 tests. Loopback cases share [robot_interface_test_fixture.hpp](robot_interface_test_fixture.hpp);
@@ -73,7 +79,7 @@ PYTHONPATH=src/omron_amr/amr_core/test python3 -m pytest -p test_configuration \
 
 Docking state and motion telemetry were read during the tests. The operator reported the charging situation, but no separate end-to-end acceptance of the charging and battery interfaces is documented here. Odometry supplied the motion guards and reported displacement and velocity; its accuracy and units have not been independently verified against a physical reference.
 
-Two separately authorized firmware-backed undock actions timed out without observed movement. After the charger was unplugged and the robot rebooted, later preflights reported Undocked. The failure remains unresolved; see [known issues](../../known_issues.md).
+Two earlier firmware-backed undock actions timed out without observed movement. On 2026-10-30, the operator reported physical departure on two separately authorized firmware undock attempts, but both ROS actions failed. The latest reported stale docking feedback followed by fresh Undocked and stationary feedback; the feedback gap remains unresolved. See [known issues](../../known_issues.md).
 
 The following read-only observer records odometry and checks the expected dead zones; it is not a charging or battery acceptance test. Use a new output filename and obtain separate approval for robot access:
 

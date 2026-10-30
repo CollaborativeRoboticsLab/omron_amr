@@ -79,6 +79,7 @@ public:
     submitted_ = stop_requested_ = stop_submitted_ = stop_queued_ = terminal_ = success_ = stopped_ = false;
     message_.clear();
     failure_reason_.clear();
+    operation_query_timeouts_ = 0;
     operation_timeout_sec_ = std::min(max_undocking_time, undock_timeout_sec_);
     reserved_ = true;
     return true;
@@ -204,6 +205,7 @@ public:
     if (query_pending_ && now - queried_ >= std::chrono::seconds(1))
     {
       query_pending_ = false;
+      if (reserved_ && submitted_ && !terminal_) ++operation_query_timeouts_;
       update(Feedback::Unknown);
     }
     if (!query_pending_ && now - queried_ >= std::chrono::milliseconds(100))
@@ -246,7 +248,18 @@ public:
       else if (!mode_ready)
         failure_reason_ = "Confirmed drive mode lost during undocking";
       else if (!infoFresh(now))
-        failure_reason_ = "Docking feedback stale during undocking";
+      {
+        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - operation_started_).count();
+        const auto info_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - info_received_).count();
+        const auto query_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - queried_).count();
+        failure_reason_ = "Docking feedback stale during undocking; elapsed_ms=" +
+                          std::to_string(elapsed_ms) + "; last_info_age_ms=" +
+                          (have_info_ ? std::to_string(info_age_ms) : "unknown") +
+                          "; last_reply_after_latest_query_ms=" + std::to_string(last_reply_after_latest_query_ms_) +
+                          "; query_pending=" + (query_pending_ ? "true" : "false") +
+                          "; query_age_ms=" + std::to_string(query_age_ms) + "; query_timeouts=" +
+                          std::to_string(operation_query_timeouts_);
+      }
       else if (now - telemetry_received_ >= std::chrono::milliseconds(200))
         failure_reason_ = "Velocity telemetry stale during undocking";
       else if (readiness().state == State::Failed)
@@ -413,6 +426,7 @@ private:
     }
     have_info_ = true;
     info_received_ = now;
+    last_reply_after_latest_query_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(now - queried_).count();
     if (info_.forced || info_.shutdown_countdown != 0)
     {
       update(Feedback::Unknown);
@@ -476,6 +490,8 @@ private:
   std::mutex operation_mutex_;
   DockInfo info_;
   TimePoint queried_{}, info_received_{}, telemetry_received_{}, stationary_since_{}, operation_started_{}, stop_started_{};
+  std::chrono::milliseconds::rep last_reply_after_latest_query_ms_{ 0 };
+  unsigned int operation_query_timeouts_{ 0 };
   bool supported_{ false }, mode_ready_{ false }, contact_confirmed_{ false }, query_pending_{ false };
   bool have_info_{ false }, zero_velocity_{ false }, reserved_{ false }, request_pending_{ false };
   bool submitted_{ false }, stop_requested_{ false }, stop_submitted_{ false }, stop_queued_{ false };

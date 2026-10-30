@@ -287,6 +287,44 @@ TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReser
   docking_->finishUndock();
 }
 
+TEST_F(DriverInterfaceLoopbackTest, DockingFeedbackGapLatchesFailureAfterFreshUndockedReply)
+{
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_after_undock_ = true;
+  }
+  ASSERT_TRUE(docking_->reserveUndock(true, true));
+  docking_->beginUndock();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_EQ(undock_requests_, 1);
+    suppress_docking_replies_ = false;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
+  const auto status = docking_->operationStatus();
+  EXPECT_FALSE(status.success);
+  EXPECT_TRUE(status.stationary_observed);
+  EXPECT_EQ(status.docking_state, 0);
+  EXPECT_NE(status.message.find("Docking feedback stale during undocking"), std::string::npos);
+  EXPECT_NE(status.message.find("elapsed_ms="), std::string::npos);
+  const std::string age_field = "last_info_age_ms=";
+  const auto age_position = status.message.find(age_field);
+  ASSERT_NE(age_position, std::string::npos);
+  EXPECT_GE(std::stoll(status.message.substr(age_position + age_field.size())), 1000);
+  EXPECT_NE(status.message.find("last_reply_after_latest_query_ms="), std::string::npos);
+  EXPECT_NE(status.message.find("query_pending="), std::string::npos);
+  EXPECT_NE(status.message.find("query_age_ms="), std::string::npos);
+  EXPECT_NE(status.message.find("query_timeouts="), std::string::npos);
+  EXPECT_NE(status.message.find("last dockInfo state=0 (fresh)"), std::string::npos);
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Failed);
+  docking_->finishUndock();
+}
+
 TEST_F(DriverInterfaceLoopbackTest, DockingBackendCancellationBeforeBeginNeverSubmitsDeparture)
 {
   initializeDockingBackend();

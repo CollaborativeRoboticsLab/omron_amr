@@ -8,6 +8,7 @@ import signal
 import subprocess
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 import yaml
 
@@ -59,6 +60,37 @@ def test_default_navigation_parameter_file_exists():
     assert isinstance(default, ast.Call)
     suffix = [ast.literal_eval(argument) for argument in default.args[1:]]
     assert (PACKAGE.joinpath(*suffix)).is_file()
+
+
+def test_default_slam_parameters_match_ld250_frames_and_relative_scan(monkeypatch):
+    spec = importlib.util.spec_from_file_location('slam_launch', PACKAGE / 'launch/slam.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rewrites = []
+    original = module.RewrittenYaml
+
+    def record_rewrite(**kwargs):
+        rewrites.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(module, 'RewrittenYaml', record_rewrite)
+    module.generate_launch_description()
+    assert len(rewrites) == 2
+    assert 'base_frame' not in rewrites[0]['param_rewrites']
+    assert rewrites[1]['param_rewrites']['base_frame'] == 'base_link'
+    assert rewrites[1]['param_rewrites']['scan_topic'] == 'scan'
+
+
+def test_ld250_rviz_displays_navigation_map_and_panel():
+    rviz = yaml.safe_load((PACKAGE.parent / 'amr_ros/rviz/rviz_ld250.rviz').read_text())
+    assert any(panel['Class'] == 'nav2_rviz_plugins/Navigation 2' for panel in rviz['Panels'])
+    visualization = rviz['Visualization Manager']
+    assert visualization['Global Options']['Fixed Frame'] == 'map'
+    maps = [display for display in visualization['Displays'] if display['Class'] == 'rviz_default_plugins/Map']
+    assert len(maps) == 1
+    assert maps[0]['Enabled'] is True
+    assert maps[0]['Topic']['Value'] == 'map'
+    assert maps[0]['Topic']['Durability Policy'] == 'Transient Local'
 
 
 def test_hardware_namespace_scopes_nodes_parameters_and_default_topics(monkeypatch):
@@ -121,6 +153,29 @@ def test_navigation_wrapper_keeps_legacy_namespace_switch(monkeypatch):
         context = LaunchContext()
         context.launch_configurations.update({'namespace': 'amr1', 'use_namespace': enabled})
         assert captured[0]['namespace'].perform(context) == expected
+
+
+def test_slam_navigation_disallows_unknown_without_changing_localization(monkeypatch):
+    from launch import LaunchContext
+
+    spec = importlib.util.spec_from_file_location('nav_unknown_launch', PACKAGE / 'launch/ld250.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    includes = []
+    original_include = module.IncludeLaunchDescription
+    monkeypatch.setattr(module, 'IncludeLaunchDescription',
+                        lambda *args, **kwargs: includes.append(kwargs) or original_include(*args, **kwargs))
+    module.generate_launch_description()
+    navigation = next(item for item in includes if 'container_name' in dict(item['launch_arguments']))
+    params_file = dict(navigation['launch_arguments'])['params_file']
+    for slam, expected in (('true', False), ('false', True)):
+        context = LaunchContext()
+        context.launch_configurations.update({
+            'slam': slam, 'namespace': '', 'use_namespace': 'false',
+            'params_file': str(PACKAGE / 'config/ld250_nav2.yaml'),
+        })
+        config = yaml.safe_load(Path(params_file.perform(context)).read_text())
+        assert config['planner_server']['ros__parameters']['GridBased']['allow_unknown'] is expected
 
 
 def test_two_hardware_namespaces_load_overlays_and_isolate_commands(monkeypatch, tmp_path):
@@ -213,6 +268,67 @@ def test_command_types_and_open_loop_feedback_are_explicit():
     for node in ('controller_server', 'behavior_server', 'velocity_smoother'):
         assert params[node]['ros__parameters']['enable_stamped_cmd_vel'] is False
     assert params['velocity_smoother']['ros__parameters']['feedback'] == 'OPEN_LOOP'
+    assert not params['bt_navigator']['ros__parameters'].get('plugin_lib_names')
+
+
+def test_planner_and_behavior_plugins_are_installed():
+    from ament_index_python.packages import get_package_share_directory
+
+    params = navigation_parameters()
+    for package, manifest, node, key in (
+            ('nav2_navfn_planner', 'global_planner_plugin.xml', 'planner_server', 'planner_plugins'),
+            ('nav2_behaviors', 'behavior_plugin.xml', 'behavior_server', 'behavior_plugins')):
+        root = ET.parse(Path(get_package_share_directory(package)) / manifest).getroot()
+        classes = {element.get('name') or element.get('type') for element in root.iter('class')}
+        settings = params[node]['ros__parameters']
+        for plugin in settings[key]:
+            assert settings[plugin]['plugin'] in classes
+
+
+def test_bt_navigator_configures_with_builtin_plugins(monkeypatch):
+    from ament_index_python.packages import get_package_prefix
+    from lifecycle_msgs.srv import ChangeState
+    import rclpy
+    from rclpy.context import Context
+    from rclpy.executors import SingleThreadedExecutor
+
+    domain = 175 + os.getpid() % 15
+    monkeypatch.setenv('ROS_LOCALHOST_ONLY', '1')
+    environment = os.environ.copy()
+    environment['ROS_DOMAIN_ID'] = str(domain)
+    executable = Path(get_package_prefix('nav2_bt_navigator')) / 'lib/nav2_bt_navigator/bt_navigator'
+    command = [str(executable), '--ros-args', '--params-file', str(PACKAGE / 'config/ld250_nav2.yaml'),
+               '-p', 'use_sim_time:=false']
+    context = Context()
+    node = None
+    executor = None
+    with tempfile.TemporaryFile(mode='w+t') as output:
+        process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, env=environment)
+        try:
+            rclpy.init(context=context, domain_id=domain)
+            node = rclpy.create_node('offline_bt_configure_test', context=context)
+            executor = SingleThreadedExecutor(context=context)
+            client = node.create_client(ChangeState, '/bt_navigator/change_state')
+            assert client.wait_for_service(timeout_sec=10.0)
+            request = ChangeState.Request()
+            request.transition.id = 1
+            future = client.call_async(request)
+            rclpy.spin_until_future_complete(node, future, executor=executor, timeout_sec=10.0)
+            assert future.done() and future.result() is not None and future.result().success
+        finally:
+            if executor is not None:
+                executor.shutdown()
+            if node is not None:
+                node.destroy_node()
+            if context.ok():
+                context.shutdown()
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5.0)
 
 
 def test_controller_and_smoother_limits_fit_both_driver_configurations():

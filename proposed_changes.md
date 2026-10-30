@@ -9,11 +9,11 @@ been performed, but hardware acceptance remains incomplete.
 
 ### Current Status
 
-As of 2026-10-30, the BOM-free empty map has been activated and independently
-confirmed as both active and configured. The last robot observations were Docked,
-stationary, and safe drive enabled; they are not a current-state check. The map
-has no obstacle geometry or localization features and is not suitable for
-autonomous movement testing.
+As of 2026-10-30, the BOM-free empty map was independently confirmed as both
+active and configured. Subsequent supervised undock attempts physically departed
+according to the operator, but the ROS actions failed; these observations are not
+a current-state check. The map has no obstacle geometry or localization features
+and is not suitable for autonomous movement testing.
 
 The core loopback tests are split by interface under a shared test fixture; the
 aggregate GoogleTest target is `test_robot_interface`. All four core test groups
@@ -41,6 +41,26 @@ review are now complete. Remaining offline follow-up includes failure/recovery
 coverage and explicit deployment/arbitration design. These do not complete
 hardware gates.
 
+### Next Steps Toward Nav2 Movement
+
+1. Investigate docking feedback timing. A localhost test now reproduces a reply
+	gap followed by fresh Undocked feedback, and stale-feedback results record
+	poll timing at failure. The real gap remains unexplained. Keep stale-feedback
+	inhibition in place; resolve the action result before relying on automated
+	undocking.
+2. With separate approval, inspect the current robot state, faults, map,
+	localization, ROS graph, and active controller ownership. Capture the remaining
+	robot configuration and firmware contract without changing settings.
+3. Use a validated map with usable localization features and appropriate
+	obstacle information. Confirm localization and TF against the physical scene;
+	the activated empty map is not adequate for autonomous navigation.
+4. Establish command arbitration, independent protective functions, physical
+	stopping and joystick takeover, and conservative measured motion limits under
+	the site's supervised procedure. Keep calibration unconfirmed until measured.
+5. Only after these gates, conduct separately authorized, short Nav2 movement
+	trials with an operator, a clear area, an accessible E-stop, and agreed travel
+	and stopping limits. Record behavior and stop on unexpected results.
+
 ### Recorded Hardware Work
 
 - Read-only discovery and configuration snapshots exercised the connection and
@@ -52,11 +72,14 @@ hardware gates.
 - Supervised forward, reverse, and curved trials produced motion. A -0.2 m/s
 	reverse request produced about -0.048 m/s reported steady velocity. Odometry
 	and stopping were not independently validated; stop delivery is unconfirmed.
-- Two firmware undock attempts timed out. A later separately authorized docked
-	forward pulse produced no observed movement; the latest recorded checks showed
-	Undocking and stationary telemetry, without confirmation of cancellation.
-	A later check reported Docked; the undocking cause remains unknown. See [known issues](known_issues.md) and
-	[test results](amr_core/test/README.md).
+- Two earlier firmware undock attempts timed out without observed movement; a
+	later experimental docked forward pulse also produced no observed movement.
+	On 2026-10-30, two separately authorized firmware undock attempts physically
+	departed according to the operator, but both ROS actions returned failure.
+	The latest reported stale docking feedback followed by fresh Undocked and
+	stationary feedback; the reason for the feedback gap remains unknown. The
+	experimental forward-departure bypass has been removed. See [known issues](known_issues.md)
+	and [test results](amr_core/test/README.md).
 - The empty dock-at-origin map parsed offline. Read-only server discovery found
 	`putFile`, `putFileInterleaved`, `processMapChanges`, and `getMapName`; the
 	active map was `uc_room1.map`. A read-only server snapshot was saved privately

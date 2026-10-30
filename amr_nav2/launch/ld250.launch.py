@@ -47,6 +47,11 @@ def generate_launch_description():
         replacements={'<robot_namespace>': ('/', namespace)},
         condition=IfCondition(use_namespace))
 
+    navigation_params_file = IfElseSubstitution(
+        slam,
+        RewrittenYaml(source_file=params_file, param_rewrites={'allow_unknown': 'False'}, convert_types=True),
+        params_file)
+
     configured_params = ParameterFile(
         RewrittenYaml(
             source_file=params_file,
@@ -126,7 +131,7 @@ def generate_launch_description():
             launch_arguments={'namespace': namespace,
                               'use_sim_time': use_sim_time,
                               'autostart': autostart,
-                              'params_file': params_file,
+                              'params_file': navigation_params_file,
                               'use_composition': use_composition,
                               'use_respawn': use_respawn,
                               'container_name': 'nav2_container'}.items()),

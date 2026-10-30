@@ -40,6 +40,23 @@ locally queued; a subsequent valid fault query reported zero faults. Docking
 status remained Docked and telemetry remained stationary. This does not resolve
 or explain the earlier undocking failures.
 
+On 2026-10-30, two separately authorized firmware-backed undock actions resulted
+in physical departure according to the operator, but both ROS actions returned
+`FAILED_TO_CONTROL` (905). The first reported stale docking feedback and an
+unconfirmed stop. In the second, the driver latched a stale `dockInfo` failure,
+requested a stop, then received fresh Undocked and stationary feedback; the
+operator reported the robot undocked and stopped. The later feedback does not
+prove that the stop request caused or confirmed a firmware stop. The reason for
+the feedback gap is unknown; 905 is the ROS action result, not a confirmed
+firmware fault. The experimental docked forward-departure bypass has been removed.
+
+An offline fake-server test reproduces the gap followed by fresh Undocked
+feedback; the failure remains latched. New stale-feedback results include poll
+timing at failure, but cannot associate a reply with a specific request. The
+real gap remains unexplained. Investigate before relying on automated undocking;
+do not weaken stale-feedback inhibition without evidence. The latest audit is
+`build/amr_core/undocking/undock-once-20261030T032045Z.json`.
+
 Do not automatically retry or assume that a stop request canceled firmware
 undocking. Inspect the current robot state and faults and use supported recovery
 procedures before further movement. See the [experiment log](docs/experiement_log.md)

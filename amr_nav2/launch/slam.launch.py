@@ -57,7 +57,9 @@ def generate_launch_description():
     configured_params = ParameterFile(configured_yaml, allow_substs=True)
     default_slam_params = RewrittenYaml(
         source_file=os.path.join(slam_toolbox_dir, 'config', 'mapper_params_online_sync.yaml'),
-        root_key=namespace, param_rewrites=param_substitutions, convert_types=True)
+        root_key=namespace,
+        param_rewrites={**param_substitutions, 'base_frame': 'base_link', 'scan_topic': 'scan'},
+        convert_types=True)
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -142,10 +144,14 @@ def generate_launch_description():
     # Running Map Saver Server
     ld.add_action(start_map_saver_server_cmd)
     ld.add_action(start_lifecycle_manager_cmd)
+    ld.add_action(Node(
+        package='amr_nav2', executable='pad_slam_map.py', namespace=namespace,
+        parameters=[{'use_sim_time': use_sim_time}], output='screen'))
     ld.add_action(GroupAction([
         PushRosNamespace(namespace),
         SetRemap('/tf', 'tf'), SetRemap('/tf_static', 'tf_static'),
-        SetRemap('/scan', 'scan'), SetRemap('/map', 'map'),
+        SetRemap('/scan', 'scan'), SetRemap('/map', 'slam_map_raw'),
+        SetRemap('/map_metadata', 'slam_map_raw_metadata'),
         start_slam_toolbox_cmd, start_slam_toolbox_cmd_with_params,
     ]))
 
