@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import signal
 import subprocess
-import tempfile
 import time
 
 import yaml
@@ -157,7 +156,6 @@ def main():
     process = None
     node = None
     initialized = False
-    scoped = None
     stop_publisher = None
     samples = []
     try:
@@ -168,11 +166,8 @@ def main():
             raise RuntimeError('Robot docking state does not match the selected test')
         report['before_telemetry'] = query('config')
         report['before_settings'] = query('config-capture')
-        scoped = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-        yaml.safe_dump({'/drive_acceptance/amr_core': {'ros__parameters': parameters}}, scoped)
-        scoped.flush()
-        driver_command = [str(executable), '--ros-args', '--params-file', scoped.name,
-            '-r', '__node:=amr_core', '-r', '__ns:=/drive_acceptance',
+        driver_command = [str(executable), '--ros-args', '--params-file', str(parameters_path),
+            '-r', '__node:=amr_core', '-r', 'undock_robot:=/drive_acceptance/undock_robot',
             '-p', 'status.publish:=false', '-p', 'laser.main_laser.enabled:=false',
             '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.publish_robot_tf:=false',
             '-p', 'docking.contact_dock_confirmed:=true',
@@ -297,8 +292,6 @@ def main():
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
-        if scoped is not None:
-            scoped.close()
         try:
             report['after_docking'] = query('docking-status')
             report['after_telemetry'] = query('config')

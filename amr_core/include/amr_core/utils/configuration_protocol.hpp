@@ -15,6 +15,48 @@
 
 namespace amr_core
 {
+inline std::vector<std::uint8_t> mapSelectionRequest(const std::string& expected, const std::string& target)
+{
+  const auto valid_name = [](const std::string& name) {
+    return name.size() > 4 && name.size() <= 128 && name.substr(name.size() - 4) == ".map" &&
+           std::all_of(name.begin(), name.end() - 4, [](unsigned char character) {
+             return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+                    (character >= '0' && character <= '9') || character == '_' || character == '-';
+           });
+  };
+  if (!valid_name(expected) || !valid_name(target) || expected == target)
+    throw std::invalid_argument("Invalid map selection");
+  std::vector<std::uint8_t> body{ 2, 0, 0, 0 };
+  const auto text = [&body](const std::string& value) {
+    body.insert(body.end(), value.begin(), value.end());
+    body.push_back(0);
+  };
+  for (const auto operation : { std::uint8_t(4), std::uint8_t(6) })
+  {
+    body.insert(body.end(), { 1, operation, 1 });
+    for (const auto& field : { std::string("Robot Operation"), std::string("Files"), std::string(), std::string("Map") })
+      text(field);
+    if (operation == 4)
+    {
+      body.push_back('s');
+      text(expected);
+      text(target);
+    }
+    else
+    {
+      body.push_back(2);
+      text("false");
+      text("true");
+    }
+  }
+  std::vector<std::uint8_t> request{ 1, 0, 1, 0, 0, 0 };
+  for (int field = 0; field < 2; ++field)
+    for (unsigned shift = 0; shift < 64; shift += 8)
+      request.push_back(static_cast<std::uint8_t>(static_cast<std::uint64_t>(body.size()) >> shift));
+  request.insert(request.end(), body.begin(), body.end());
+  return request;
+}
+
 inline std::vector<std::uint8_t> teleopNumericRequest(const std::string& name, const std::string& expected,
                                                       const std::string& target)
 {
@@ -98,7 +140,7 @@ inline bool matchesSingleChangeReceipt(const std::vector<std::uint8_t>& payload)
 
 inline std::vector<std::uint8_t> sectionRequest(const std::string& section)
 {
-  if (section != "Robot config" && section != "Teleop Settings")
+  if (section != "Robot config" && section != "Teleop Settings" && section != "Files")
   {
     throw std::invalid_argument("Configuration section is not allowlisted");
   }
@@ -352,6 +394,13 @@ public:
         {
           throw std::runtime_error("Drive configuration parameter is not numeric");
         }
+        parameter["section"] = section_;
+        result.push_back(std::move(parameter));
+      }
+      else if (section_ == "Files" && name == "Map")
+      {
+        if (parameter.at("wire_type") != "s" || !parameter.at("value").is_string())
+          throw std::runtime_error("Map configuration parameter is not a string");
         parameter["section"] = section_;
         result.push_back(std::move(parameter));
       }

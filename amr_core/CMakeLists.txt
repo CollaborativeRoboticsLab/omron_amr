@@ -80,19 +80,22 @@ if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(tf2_msgs REQUIRED)
   find_package(nav2_velocity_smoother REQUIRED)
-  ament_add_gtest(test_drive_interface
+  ament_add_gtest(test_robot_interface
+    test/test_config_interface.cpp
+    test/test_debug_interface.cpp
     test/test_docking_interface.cpp
     test/test_drive_command_policy.cpp
     test/test_drive_ratio_mapping.cpp
     test/test_drive_interface.cpp
     test/test_drive_tcp_sender.cpp
+    test/test_map_interface.cpp
   )
-  ament_target_dependencies(test_drive_interface
+  ament_target_dependencies(test_robot_interface
     rclcpp rclcpp_action amr_msgs nav2_msgs tf2_ros tf2_msgs std_msgs std_srvs nav_msgs geometry_msgs nav2_velocity_smoother
   )
-  target_link_libraries(test_drive_interface libaria::ArNetworking nlohmann_json::nlohmann_json)
-  target_compile_definitions(test_drive_interface PRIVATE AMR_CORE_EXECUTABLE="$<TARGET_FILE:amr_core>")
-  add_dependencies(test_drive_interface amr_core)
+  target_link_libraries(test_robot_interface libaria::ArNetworking nlohmann_json::nlohmann_json)
+  target_compile_definitions(test_robot_interface PRIVATE AMR_CORE_EXECUTABLE="$<TARGET_FILE:amr_core>")
+  add_dependencies(test_robot_interface amr_core)
 
   ament_add_gtest(test_hybrid_config test/test_hybrid_config.cpp)
   target_link_libraries(test_hybrid_config libaria::ArNetworking nlohmann_json::nlohmann_json)

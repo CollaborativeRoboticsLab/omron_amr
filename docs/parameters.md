@@ -68,6 +68,12 @@ The published angle increment is inferred from the packet when enough points are
 - `fault.auto_acknowledge_fault_list`: string array, empty by default. The LD250 configuration lists `IrregularShutdown`, but leaves automatic acknowledgement disabled. Names must be unique, nonblank, at most 128 bytes, and contain no control characters.
 - `map.ros_service.enabled`: default `false`. Enables a read-only active-map query over a separate robot connection.
 - `map.ros_service.name`: default `map/get_active_map`. The `std_srvs/Trigger` response contains the active map name in `message` when successful. It does not upload, activate, or validate a map.
+
+For a separately authorized upload, `amr_hardware_probe map-upload` reads the robot host, port, user, password, protocol, and local map path as six newline-separated stdin fields. It validates the local map with ARIA, uploads it under a random `staged_*.map` filename, and compares a full readback before reporting success. `map-upload-named` additionally reads the desired filename as a seventh field and checks the remote directory for an existing name. Neither activates the file. The server protocol can overwrite existing names and does not provide exclusive creation; the directory check is not atomic, and a random 128-bit suffix makes a collision unlikely but cannot guarantee it. A failure after transfer begins can leave a staged or temporary file on the robot. Keep credentials off command lines and out of logs.
+
+`amr_hardware_probe map-download` accepts the same seven stdin fields as `map-upload-named`, with the sixth field specifying a new local output path and the seventh the remote filename. It saves the downloaded bytes without overwriting an existing file and reports whether ARIA can parse them; an unparseable file is still saved for inspection.
+
+`amr_hardware_probe map-activate` reads connection fields, the expected local map path, the remote target name, and the expected currently active name on stdin. It compares the remote file, checks active and configured names and fresh docked/stationary feedback, sends one map-selection transaction, and verifies both names afterward. A failed or missing receipt leaves the outcome unverified and must not be blindly retried. Activation can disrupt localization; docked status and this guard do not establish movement safety.
 - `driver.publish_odom`: enables odometry publication from `amr_core`.
 - `driver.publish_robot_tf`: enables the `odom -> base_link` TF publisher.
 - `driver.odom_frame`: frame id assigned to published odometry.

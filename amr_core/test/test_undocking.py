@@ -4,26 +4,12 @@ import os
 from pathlib import Path
 import signal
 import subprocess
-import tempfile
 import time
 
 import pytest
-import yaml
 
 
 pytestmark = [pytest.mark.hardware, pytest.mark.movement]
-
-
-def scoped_robot_parameters(parameters):
-    values = yaml.safe_load(Path(parameters).read_text())['amr_core']['ros__parameters']
-    temporary = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml')
-    try:
-        yaml.safe_dump({'/undock_acceptance/amr_core': {'ros__parameters': values}}, temporary)
-        temporary.flush()
-    except Exception:
-        temporary.close()
-        raise
-    return temporary
 
 
 def test_one_supervised_contact_dock_departure(pytestconfig, robot_settings):
@@ -76,7 +62,6 @@ def test_one_supervised_contact_dock_departure(pytestconfig, robot_settings):
     client = None
     initialized = False
     goal = None
-    scoped_parameters = None
     try:
         persist()
         report['before'] = query('docking-status')
@@ -84,9 +69,8 @@ def test_one_supervised_contact_dock_departure(pytestconfig, robot_settings):
             raise RuntimeError('Robot is not in the approved unforced Docked state')
         if not query('config')['stationary']:
             raise RuntimeError('Stationary preflight failed')
-        scoped_parameters = scoped_robot_parameters(parameters)
-        process = subprocess.Popen([str(executable), '--ros-args', '--params-file', scoped_parameters.name,
-            '-r', '__node:=amr_core', '-r', '__ns:=/undock_acceptance',
+        process = subprocess.Popen([str(executable), '--ros-args', '--params-file', parameters,
+            '-r', '__node:=amr_core', '-r', 'undock_robot:=/undock_acceptance/undock_robot',
             '-p', 'status.publish:=false', '-p', 'laser.main_laser.enabled:=false',
             '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.publish_robot_tf:=false',
             '-p', 'docking.contact_dock_confirmed:=true', '-p', 'docking.exclusive_control_confirmed:=true',
@@ -146,8 +130,6 @@ def test_one_supervised_contact_dock_departure(pytestconfig, robot_settings):
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
-        if scoped_parameters is not None:
-            scoped_parameters.close()
         try:
             report['after'] = query('docking-status')
             report['after_telemetry'] = query('config')

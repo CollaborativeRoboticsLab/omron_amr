@@ -10,14 +10,30 @@ The core suite tests command expiry, stop priority, ratio mapping, transport,
 docking, configuration and calibration workflows. Localhost tests exercise the
 driver and docking action against a fake server, including all six primitive
 streams. Python tests cover captured data and pulse-runner guards. All four
-registered core test groups passed on 2026-10-28. Offline tests do not establish
+registered core test groups passed on 2026-10-30 after the loopback tests were
+split by interface. The aggregate target was then renamed to
+`test_robot_interface`, rebuilt and passed separately. The test executable
+contains 117 cases, including 69 loopback cases. Offline tests do not establish
 physical motion, firmware behavior or safety performance.
+
+The aggregate target includes drive, configuration, map, debug and docking
+tests. Loopback cases share [robot_interface_test_fixture.hpp](robot_interface_test_fixture.hpp);
+the drive-specific cases remain in [test_drive_interface.cpp](test_drive_interface.cpp).
 
 Run the registered offline tests from the workspace root:
 
 ```bash
 source install/setup.bash
 ctest --test-dir build/amr_core --output-on-failure
+```
+
+To rebuild and run the aggregate GoogleTest target:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+cmake --build build/amr_core --target test_robot_interface -j2
+ctest --test-dir build/amr_core --output-on-failure -R '^test_robot_interface$'
 ```
 
 ## Manual Static Inspection

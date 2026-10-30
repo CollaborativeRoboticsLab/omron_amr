@@ -6,6 +6,7 @@
 #include "amr_core/utils/deadzone_calibration.hpp"
 #include "amr_core/utils/robot_session.hpp"
 #include "amr_core/utils/map_stream.hpp"
+#include "amr_core/utils/map_activation_readiness.hpp"
 #include "amr_core/interfaces/map_interface.hpp"
 #include "amr_core/interfaces/debug_interface.hpp"
 
@@ -421,6 +422,94 @@ TEST(HybridConfig, EncodesNamedSectionRead)
   EXPECT_EQ(robot.size(), 16U);
 }
 
+TEST(HybridConfig, EncodesCapturedMapSelection)
+{
+  const auto request = amr_core::mapSelectionRequest("uc_room1.map", "empty_map_with_dock.map");
+  amr_core::ConfigCursor cursor(request);
+  EXPECT_EQ(cursor.number(1), 1U);
+  EXPECT_EQ(cursor.number(1), 0U);
+  EXPECT_EQ(cursor.number(2), 1U);
+  EXPECT_EQ(cursor.number(2), 0U);
+  EXPECT_EQ(cursor.number(8), 114U);
+  EXPECT_EQ(cursor.number(8), 114U);
+  EXPECT_EQ(cursor.number(4), 2U);
+  for (const auto operation : { 4U, 6U })
+  {
+    EXPECT_EQ(cursor.number(1), 1U);
+    EXPECT_EQ(cursor.number(1), operation);
+    EXPECT_EQ(cursor.number(1), 1U);
+    EXPECT_EQ(cursor.text(), "Robot Operation");
+    EXPECT_EQ(cursor.text(), "Files");
+    EXPECT_EQ(cursor.text(), "");
+    EXPECT_EQ(cursor.text(), "Map");
+    if (operation == 4)
+    {
+      EXPECT_EQ(cursor.number(1), static_cast<unsigned>('s'));
+      EXPECT_EQ(cursor.text(), "uc_room1.map");
+      EXPECT_EQ(cursor.text(), "empty_map_with_dock.map");
+    }
+    else
+    {
+      EXPECT_EQ(cursor.number(1), 2U);
+      EXPECT_EQ(cursor.text(), "false");
+      EXPECT_EQ(cursor.text(), "true");
+    }
+  }
+  EXPECT_EQ(cursor.remaining(), 0U);
+  EXPECT_THROW(amr_core::mapSelectionRequest("uc_room1.map", "../unsafe.map"), std::invalid_argument);
+  EXPECT_THROW(amr_core::mapSelectionRequest("uc_room1.map", "uc_room1.map"), std::invalid_argument);
+}
+
+TEST(HybridConfig, MapActivationRequiresDockedStationaryFeedback)
+{
+  const auto docking = [](int state, int countdown) {
+    ArNetPacket packet;
+    packet.uByteToBuf(state);
+    packet.uByteToBuf(0);
+    packet.uByte2ToBuf(countdown);
+    packet.finalizePacket();
+    packet.resetRead();
+    return packet;
+  };
+  const auto telemetry = [](int velocity) {
+    ArNetPacket packet;
+    packet.byte2ToBuf(100);
+    packet.byte4ToBuf(0);
+    packet.byte4ToBuf(0);
+    packet.byte2ToBuf(0);
+    packet.byte2ToBuf(velocity);
+    packet.byte2ToBuf(0);
+    packet.byte2ToBuf(0);
+    packet.byteToBuf(0);
+    packet.finalizePacket();
+    packet.resetRead();
+    return packet;
+  };
+  amr_core::MapActivationReadiness ready;
+  auto docked = docking(2, 0);
+  ready.docking(&docked);
+  for (int index = 0; index < 3; ++index)
+  {
+    auto still = telemetry(0);
+    ready.numbers(&still);
+  }
+  EXPECT_TRUE(ready.ready());
+  auto moving = telemetry(6);
+  ready.numbers(&moving);
+  EXPECT_FALSE(ready.ready());
+  amr_core::MapActivationReadiness undocked;
+  auto wrong_dock = docking(0, 0);
+  undocked.docking(&wrong_dock);
+  EXPECT_TRUE(undocked.failed);
+  amr_core::MapActivationReadiness shutdown;
+  auto pending = docking(2, 1);
+  shutdown.docking(&pending);
+  EXPECT_TRUE(shutdown.failed);
+  amr_core::MapActivationReadiness malformed;
+  malformed.numbers(nullptr);
+  EXPECT_TRUE(malformed.failed);
+}
+
 TEST(HybridConfig, DecodesCapturedDeadzoneWriteTransaction)
 {
   const Bytes captured{ 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x7a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7a, 0x00,
@@ -728,6 +817,29 @@ TEST(HybridConfig, RejectsUnrelatedSectionsAndEmbeddedTerminators)
   {
     EXPECT_THROW(amr_core::sectionRequest(section), std::invalid_argument);
   }
+}
+
+TEST(HybridConfig, ReadsOnlyMapFromFilesSection)
+{
+  Bytes content{ 1, 0, 0, 0, 'P' };
+  text(content, "Map");
+  text(content, "");
+  content.insert(content.end(), { 3, 's' });
+  text(content, "fixture.map");
+  content.insert(content.end(), { 0, 0, 0, 1, 0, 0, 0, 0 });
+  Bytes packet{ 1, 4 };
+  text(packet, "Files");
+  packet.push_back(0);
+  number(packet, 1, 2);
+  number(packet, 0, 2);
+  number(packet, content.size(), 8);
+  number(packet, content.size(), 8);
+  packet.insert(packet.end(), content.begin(), content.end());
+  amr_core::SectionTransfer transfer("Files");
+  transfer.accept(packet);
+  const auto values = transfer.parameters();
+  ASSERT_EQ(values.size(), 1U);
+  EXPECT_EQ(values[0].at("value"), "fixture.map");
 }
 
 TEST(HybridConfig, DecodesSignedValuesBoundsAndSourceMetadata)

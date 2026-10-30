@@ -100,6 +100,34 @@ public:
     return snapshot;
   }
 
+  std::string getMapSelection()
+  {
+    requireService("getConfigValues");
+    HybridObservation observation("Files");
+    ArFunctor1C<HybridObservation, ArNetPacket*> callback(&observation, &HybridObservation::receive);
+    if (!client_.addHandler("getConfigValues", &callback)) throw std::runtime_error("Cannot register configuration reader");
+    const auto encoded = sectionRequest("Files");
+    ArNetPacket request;
+    request.dataToBuf(encoded.data(), static_cast<int>(encoded.size()));
+    const bool submitted = client_.requestOnce("getConfigValues", &request);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (submitted && client_.isConnected() && !client_.hasTransportFailure() && !observation.failed &&
+           !observation.transfer.complete() && std::chrono::steady_clock::now() < deadline)
+      client_.loopOnce();
+    client_.remHandler("getConfigValues", &callback);
+    if (!submitted || observation.failed || !observation.transfer.complete() || !client_.isConnected() ||
+        client_.hasTransportFailure())
+      throw std::runtime_error("Map configuration read failed");
+    const auto values = observation.transfer.parameters();
+    if (values.size() != 1 || values[0].at("name") != "Map") throw std::runtime_error("Map setting unavailable");
+    return values[0].at("value").get<std::string>();
+  }
+
+  bool setMapSelection(const std::string& expected, const std::string& target)
+  {
+    return writeSingleValue(mapSelectionRequest(expected, target), 2);
+  }
+
   bool setTranslationDeadzone(int expected, int target)
   {
     return writeSingleValue(translationDeadzoneRequest(expected, target));
@@ -116,10 +144,10 @@ public:
   }
 
 private:
-  bool writeSingleValue(const std::vector<std::uint8_t>& encoded)
+  bool writeSingleValue(const std::vector<std::uint8_t>& encoded, std::uint8_t expected_count = 1)
   {
     requireService("setConfigValues");
-    Receipt receipt;
+    Receipt receipt(expected_count);
     ArFunctor1C<Receipt, ArNetPacket*> callback(&receipt, &Receipt::receive);
     if (!client_.addHandler("setConfigValues", &callback))
     {
@@ -142,15 +170,19 @@ private:
   class Receipt
   {
   public:
+    explicit Receipt(std::uint8_t expected_count) : expected_count_(expected_count) {}
     void receive(ArNetPacket* packet)
     {
       ++count;
       const auto* begin = reinterpret_cast<const std::uint8_t*>(packet->getBuf()) + packet->getHeaderLength();
-      matches = matchesSingleChangeReceipt({ begin, begin + packet->getDataLength() });
+      matches = std::vector<std::uint8_t>(begin, begin + packet->getDataLength()) ==
+            std::vector<std::uint8_t>{ 1, 0, expected_count_, 0, 0, 0 };
     }
 
     int count = 0;
     bool matches = false;
+  private:
+    std::uint8_t expected_count_;
   };
 
   void requireService(const char* service) const

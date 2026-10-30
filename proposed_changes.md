@@ -7,6 +7,21 @@ This document tracks the plan and implementation. Checked tasks indicate
 completed work only within the scope stated. Supervised robot experiments have
 been performed, but hardware acceptance remains incomplete.
 
+### Current Status
+
+As of 2026-10-30, the BOM-free empty map has been activated and independently
+confirmed as both active and configured. The last robot observations were Docked,
+stationary, and safe drive enabled; they are not a current-state check. The map
+has no obstacle geometry or localization features and is not suitable for
+autonomous movement testing.
+
+The core loopback tests are split by interface under a shared test fixture; the
+aggregate GoogleTest target is `test_robot_interface`. All four core test groups
+passed offline after the split, and the renamed target was rebuilt and passed
+separately. Remaining work includes the robot contract, failure/recovery and
+arbitration coverage, calibration, physical stopping, and Nav2 hardware
+acceptance. No new robot access or movement is authorized by these results.
+
 ### Robot Work Deferred
 
 The robot was reconnected for read-only inspection. Further live configuration
@@ -44,11 +59,30 @@ hardware gates.
 	[test results](amr_core/test/README.md).
 - The empty dock-at-origin map parsed offline. Read-only server discovery found
 	`putFile`, `putFileInterleaved`, `processMapChanges`, and `getMapName`; the
-	active map was `uc_room1.map`. Transfer permission, upload, and activation
-	remain unverified; no map was uploaded. A read-only server snapshot was saved
-	privately and matched the supplied original byte-for-byte (721600 bytes).
-	A separate map interface and default-off ROS active-map query are implemented;
-	upload and activation are not implemented. After an operator reboot, docking
+	active map was `uc_room1.map`. A read-only server snapshot was saved privately
+	and matched the supplied original byte-for-byte (721600 bytes). On 2026-10-29,
+	the empty map was uploaded as `staged_6f88e396d589c32f80723131490efc33.map`;
+	all 642 bytes matched on readback and the active map remained `uc_room1.map`.
+	On 2026-10-30 it was also uploaded as `empty_map_with_dock.map`, with all
+	642 bytes matching readback. The original staged copy was not deleted.
+	A subsequent MobilePlanner save uploaded a 192055-byte file with a UTF-8 BOM,
+	additional metadata and the origin dock. The captured upload matches a later
+	robot download byte-for-byte. The SDK parser rejects the BOM-prefixed file but
+	accepts the same bytes without the BOM. MobilePlanner's activation attempt
+	returned "was not a map file"; `Files.Map` and the active name both remained
+	`uc_room1.map`. The initial string-write transaction was rejected.
+	A BOM-free copy preserving the rest of the MobilePlanner file was uploaded as
+	`empty_map_with_dock_nobom.map`; all 192052 bytes matched readback and the
+	active map initially remained `uc_room1.map`. On 2026-10-30, the robot was
+	confirmed docked and stationary, and the captured map-selection transaction
+	was sent once. A two-operation receipt was received; subsequent independent
+	queries reported `empty_map_with_dock_nobom.map` as both active and configured.
+	The robot remained docked with safe drive enabled and no observed movement.
+	This does not validate localization or movement safety. The map interface supports
+	staging and verified readback; the default-off ROS service only queries the active
+	name. The guarded probe supports map activation with independent name readback.
+	The staged empty map has no obstacle geometry or localization features and is
+	not suitable as-is for autonomous movement testing. After an operator reboot, docking
 	status reported Docked and telemetry was stationary. The fault response
 	provisionally indicated `IrregularShutdown` but did not match the advertised
 	format. The operator confirmed the fault in MobilePlanner.
@@ -75,7 +109,7 @@ hardware gates.
 
 ### Initial Implementation Status
 
-Implemented and verified by 66 passing GoogleTest cases (11 command-policy tests,
+An earlier offline run verified the initial implementation with 66 passing GoogleTest cases (11 command-policy tests,
 28 loopback ARNetworking tests, 11 mapping tests, 10 local TCP queue tests, and 6 client-adapter
 tests): a mutex-protected latest-command mailbox,
 steady-clock expiry in the networking callback, 20 Hz default packet generation,
@@ -171,7 +205,9 @@ failures, or skipped tests. Runtime tests were restricted to localhost. The
 editor retains ROS include-path diagnostics, but the actual ROS compiler succeeds.
 Both hardware YAML configurations parsed with `send_frequency: 20.0` and
 `unsafe_drive: true`. That particular run used localhost only. All four registered
-core test groups also passed on 2026-10-28; see [test results](amr_core/test/README.md).
+core test groups also passed after the test split on 2026-10-30; the renamed
+`test_robot_interface` target subsequently passed separately. See
+[test results](amr_core/test/README.md).
 These historical results do not replace a fresh run against the current tree.
 
 Goal: provide continuous, predictable Nav2 velocity control without introducing
@@ -247,8 +283,8 @@ Do this before selecting conversion constants or changing robot configuration.
 - [ ] A2. Inspect the robot's advertised services and access permissions using a
 	read-only connection. Confirm `ratioDrive`, `stop`, `updateNumbers`, and any
 	safety-state/configuration queries actually available at runtime.
-	Read-only discovery has been exercised; a complete contract and map-upload
-	service/permission verification remain open.
+	Read-only discovery, staged map upload, and one map activation have been
+	exercised; the complete robot contract remains open.
 - [ ] A3. Export the effective teleop configuration through supported tooling.
 	Capture forward/reverse full-throttle speeds, rotation scaling at rest and in
 	motion, dead zones, acceleration/deceleration limits, and teleop timeout.
