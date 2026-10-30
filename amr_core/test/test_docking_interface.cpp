@@ -60,6 +60,117 @@ TEST(DockingInterface, StartsUnknownAndRequiresFreshFeedback)
   EXPECT_EQ(docking.readiness(now + 1s).state, Docking::State::Unknown);
 }
 
+TEST(DockingInterface, AwayFromDockAssertionIsRevokedByDockedFeedback)
+{
+  Docking docking({}, 1.0, 30.0, false);
+  const auto now = Docking::Clock::now();
+  EXPECT_TRUE(docking.readiness(now).unverified_start_allowed);
+  docking.update(Docking::Feedback::Docked, now);
+  EXPECT_EQ(docking.readiness(now).state, Docking::State::Docked);
+  EXPECT_FALSE(docking.readiness(now).unverified_start_allowed);
+  EXPECT_EQ(docking.readiness(now + 1s).state, Docking::State::Unknown);
+  EXPECT_FALSE(docking.readiness(now + 1s).unverified_start_allowed);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, UndockedStartupCanDriveWithoutDockingBackend)
+{
+  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  bool ready = false;
+  auto subscription = node_->create_subscription<std_msgs::msg::Bool>(
+      "amr/drive_ready", 10, [&ready](const std_msgs::msg::Bool& message) { ready = message.data; });
+  driver_ = std::make_unique<DriverInterface>(node_);
+  initializeDriver();
+  docking_ = driver_->dockingInterface();
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Unknown);
+  ASSERT_TRUE(waitWithExecutor([&ready]() { return ready; }));
+  publish(0.5, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ForcedDockingFeedbackRevokesUnverifiedStartup)
+{
+  ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
+  ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
+  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 0;
+    fake_docking_forced_ = true;
+  }
+  driver_ = std::make_unique<DriverInterface>(node_);
+  initializeDriver();
+  docking_ = driver_->dockingInterface();
+  ASSERT_TRUE(waitWithExecutor([this]() { return !docking_->readiness().unverified_start_allowed; }));
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Unknown);
+  EXPECT_FALSE(docking_->reserveUndock(true, true));
+  EXPECT_FALSE(docking_->reserveShutdown());
+  EXPECT_FALSE(docking_->faultAcknowledgementEligible());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ShutdownCountdownRevokesUnverifiedStartup)
+{
+  ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
+  ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
+  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 0;
+    fake_docking_shutdown_countdown_ = 1;
+  }
+  driver_ = std::make_unique<DriverInterface>(node_);
+  initializeDriver();
+  docking_ = driver_->dockingInterface();
+  ASSERT_TRUE(waitWithExecutor([this]() { return !docking_->readiness().unverified_start_allowed; }));
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Unknown);
+  EXPECT_FALSE(docking_->reserveUndock(true, true));
+  EXPECT_FALSE(docking_->reserveShutdown());
+  EXPECT_FALSE(docking_->faultAcknowledgementEligible());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, DockedFeedbackStopsUndockedStartupAndStaleFeedbackDoesNotReenableIt)
+{
+  ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
+  ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
+  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_replies_ = true;
+  }
+  driver_ = std::make_unique<DriverInterface>(node_);
+  initializeDriver();
+  docking_ = driver_->dockingInterface();
+  publish(0.5, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(50.0, 0.0); }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_replies_ = false;
+    records_.clear();
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    publish(0.5, 0.0);
+    return docking_->readiness().state == Docking::State::Docked;
+  }));
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_replies_ = true;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->readiness().state == Docking::State::Unknown; }));
+  EXPECT_FALSE(docking_->readiness().unverified_start_allowed);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    records_.clear();
+  }
+  publish(0.5, 0.0);
+  const auto started = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([started]() { return std::chrono::steady_clock::now() - started > 300ms; }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(std::none_of(records_.begin(), records_.end(), [](const Record& record) { return !record.stop; }));
+}
+
 TEST(DockingInterface, ExplicitUndockSubmitsOnceAndWaitsForFeedback)
 {
   int requests = 0;
@@ -146,7 +257,7 @@ TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnfor
     execl(AMR_CORE_EXECUTABLE, AMR_CORE_EXECUTABLE, "--ros-args", "-r", "__ns:=/dock_action_test", "-p",
           "robot.ip:=127.0.0.1", "-p", port_argument.c_str(), "-p", "robot.user:=loopback", "-p", "robot.protocol:=''",
           "-p", "status.publish:=false", "-p", "laser.main_laser.enabled:=false", "-p",
-          "driver.publish_robot_tf:=false", "-p", "driver.cmd_vel_topic:=/drive_test/cmd_vel",
+          "driver.tf.enabled:=false", "-p", "driver.cmd_vel.topic:=/drive_test/cmd_vel",
           static_cast<char*>(nullptr));
     _exit(127);
   }

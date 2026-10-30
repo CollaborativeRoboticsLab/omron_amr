@@ -80,13 +80,15 @@ def main():
     robot = parameters['robot']
     require_contact_dock(args.confirm_contact_dock_no_cable)
     driver = parameters['driver']
-    if (driver.get('ratio_mapping') != 'legacy' or driver.get('calibration', {}).get('confirmed') is not False
-            or driver.get('unsafe_drive') is not True or driver.get('cmd_vel_timeout_sec') != 0.2
-            or driver.get('max_linear_speed') != 1000.0 or driver.get('drive_throttle_pct') != 100.0):
+    drive = driver.get('drive', {})
+    cmd_vel = driver.get('cmd_vel', {})
+    if (drive.get('ratio_mapping') != 'legacy' or driver.get('calibration', {}).get('confirmed') is not False
+            or drive.get('unsafe_drive') is not True or cmd_vel.get('timeout_sec') != 0.2
+            or cmd_vel.get('max_linear') != 1000.0 or drive.get('throttle_pct') != 100.0):
         raise RuntimeError('Unexpected driver configuration; no command sent')
     linear, angular = SCENARIOS[args.scenario]
-    if not (driver['min_linear_speed'] / 1000.0 <= linear <= driver['max_linear_speed'] / 1000.0
-            and math.radians(driver['min_angular_speed']) <= angular <= math.radians(driver['max_angular_speed'])):
+    if not (cmd_vel['min_linear'] / 1000.0 <= linear <= cmd_vel['max_linear'] / 1000.0
+            and math.radians(cmd_vel['min_angular']) <= angular <= math.radians(cmd_vel['max_angular'])):
         raise RuntimeError('Scenario exceeds configured speed limits; no command sent')
     connection = '\n'.join(str(robot.get(key, '6MTX')) for key in ('ip', 'port', 'user', 'password', 'protocol')) + '\n'
     executable = workspace / 'install/amr_core/lib/amr_core/amr_core'
@@ -154,11 +156,11 @@ def main():
         driver_command = [str(executable), '--ros-args', '--params-file', str(parameters_path),
             '-r', '__node:=amr_core', '-r', 'undock_robot:=/drive_acceptance/undock_robot',
             '-p', 'status.publish:=false', '-p', 'laser.main_laser.enabled:=false',
-            '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.publish_robot_tf:=false',
+            '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.tf.enabled:=false',
             '-p', 'docking.contact_dock_confirmed:=true',
-            '-p', 'driver.cmd_vel_topic:=/drive_acceptance/cmd_vel',
-            '-p', 'driver.stop_topic:=/drive_acceptance/stop', '-p', 'driver.odom_topic:=/drive_acceptance/odom',
-            '-p', 'driver.drive_ready_topic:=/drive_acceptance/drive_ready']
+            '-p', 'driver.cmd_vel.topic:=/drive_acceptance/cmd_vel',
+            '-p', 'driver.stop.topic:=/drive_acceptance/stop', '-p', 'driver.odom.topic:=/drive_acceptance/odom',
+            '-p', 'driver.drive.ready_topic:=/drive_acceptance/drive_ready']
         process = subprocess.Popen(driver_command,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         rclpy.init()

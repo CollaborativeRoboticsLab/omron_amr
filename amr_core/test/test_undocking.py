@@ -72,9 +72,9 @@ def test_one_supervised_contact_dock_departure(pytestconfig, robot_settings):
         process = subprocess.Popen([str(executable), '--ros-args', '--params-file', parameters,
             '-r', '__node:=amr_core', '-r', 'undock_robot:=/undock_acceptance/undock_robot',
             '-p', 'status.publish:=false', '-p', 'laser.main_laser.enabled:=false',
-            '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.publish_robot_tf:=false',
+            '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.tf.enabled:=false',
             '-p', 'docking.contact_dock_confirmed:=true', '-p', 'docking.exclusive_control_confirmed:=true',
-            '-p', 'driver.cmd_vel_topic:=unused_cmd_vel'], stdout=subprocess.DEVNULL,
+            '-p', 'driver.cmd_vel.topic:=unused_cmd_vel'], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, start_new_session=True)
         rclpy.init()
         initialized = True

@@ -29,27 +29,30 @@ The hardware interface is configured from `amr_ros/config/parameters.yaml`.
 - `laser.low_laser.*`: low front laser configuration for `/scan_low`
 - Each laser block exposes `topic`, `frame_id`, `request`, `request_period_ms`, `angle_min`, `angle_max`, `angle_increment`, `range_min`, and `range_max`
 
-The LD250 description ([ld250.urdf.xacro](../amr_description/xacro/ld250.urdf.xacro) and the static [LD250.urdf](../amr_description/urdf/LD250.urdf)) publishes both `laser_frame` and `laser_frame_low`. When a parent launch overrides `robot_description` with a model that renames these links, set `laser.*.frame_id` to match, otherwise the scans cannot be transformed into `driver.base_frame`.
+The LD250 description ([ld250.urdf.xacro](../amr_description/xacro/ld250.urdf.xacro) and the static [LD250.urdf](../amr_description/urdf/LD250.urdf)) publishes both `laser_frame` and `laser_frame_low`. When a parent launch overrides `robot_description` with a model that renames these links, set `laser.*.frame_id` to match, otherwise the scans cannot be transformed into `driver.tf.base_frame`.
 
 The published `angle_increment` is derived from the configured angular span and the number of points received in each packet. The configured `angle_increment` acts as a fallback when the packet does not contain enough points to infer a step size.
 
 ### Driver interface
 
-- `driver.odom_topic`: odometry topic, currently `/odom`
-- `driver.cmd_vel_topic`: velocity command topic, currently `/cmd_vel`
-- `driver.stop_topic`: stop topic
-- `driver.publish_odom`: enables odometry publication from `amr_core`
-- `driver.publish_robot_tf`: enables TF publication from `amr_core`
-- `driver.odom_frame`: odom frame name
-- `driver.base_frame`: base frame name
-- `driver.expected_cmd_vel_freq`: expected command rate used by the cmd_vel watchdog timer
-- `driver.min_linear_speed`: minimum linear speed in mm/s
-- `driver.max_linear_speed`: maximum linear speed in mm/s
-- `driver.min_angular_speed`: minimum angular speed in deg/s
-- `driver.max_angular_speed`: maximum angular speed in deg/s
-- `driver.drive_throttle_pct`: throttle scaling
-- `driver.unsafe_drive`: enables unsafe drive mode
-- `driver.cmd_vel_timeout_sec`: watchdog timeout for velocity commands
+- `driver.odom.topic`: odometry topic, currently `/odom`
+- `driver.cmd_vel.topic`: velocity command topic, currently `/cmd_vel`
+- `driver.stop.topic`: stop topic
+- `driver.odom.publish`: enables odometry publication from `amr_core`
+- `driver.tf.enabled`: enables TF publication from `amr_core`
+- `driver.odom.frame_id`: odom frame name
+- `driver.tf.base_frame`: base frame name
+- `driver.drive.send_frequency`: maximum normal drive packet generation rate in Hz
+- `driver.docking.start_from_dock`: startup-only, default `true`. When `false`, missing docking feedback may permit motion and `/amr/drive_ready` may be true; physically verify that the robot is clear of the dock and cable. This is not a sensor check or a safety-rated protection. Observed docking, forced state, or shutdown feedback revokes the exception until restart. See [parameters.md](parameters.md) for the full policy.
+- `driver.cmd_vel.min_linear`: minimum linear speed in mm/s
+- `driver.cmd_vel.max_linear`: maximum linear speed in mm/s
+- `driver.cmd_vel.min_angular`: minimum angular speed in deg/s
+- `driver.cmd_vel.max_angular`: maximum angular speed in deg/s
+- `driver.drive.throttle_pct`: throttle scaling
+- `driver.drive.unsafe_drive`: enables unsafe drive mode
+- `driver.cmd_vel.timeout_sec`: watchdog timeout for velocity commands
+
+Driver parameters use the nested names above; old flat names are not aliases and may leave defaults in effect.
 
 ## Derived Nav2 limits
 

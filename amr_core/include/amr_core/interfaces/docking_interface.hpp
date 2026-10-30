@@ -24,9 +24,10 @@ public:
   using UndockRequest = std::function<bool()>;
 
   explicit DockingInterface(UndockRequest request = {}, double feedback_timeout_sec = 1.0,
-                            double undock_timeout_sec = 30.0)
+                            double undock_timeout_sec = 30.0, bool start_from_dock = true)
     : request_(std::move(request)), feedback_timeout_sec_(feedback_timeout_sec),
-      undock_timeout_sec_(undock_timeout_sec), info_callback_(this, &DockingInterface::handleInfo)
+      undock_timeout_sec_(undock_timeout_sec), unverified_start_allowed_(!start_from_dock),
+      info_callback_(this, &DockingInterface::handleInfo)
   {
     if (!std::isfinite(feedback_timeout_sec_) || feedback_timeout_sec_ <= 0.0 ||
         !std::isfinite(undock_timeout_sec_) || undock_timeout_sec_ <= 0.0)
@@ -303,6 +304,8 @@ public:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     refresh(now);
+    if (feedback == Feedback::Docked || feedback == Feedback::CableConnected)
+      inhibitUnverifiedStart();
     received_ = now;
     have_feedback_ = true;
     if (state_ == State::Failed)
@@ -364,13 +367,14 @@ public:
     unsigned long long generation;
     bool departure_telemetry_fresh;
     bool departure_stationary;
+    bool unverified_start_allowed;
   };
 
   Readiness readiness(TimePoint now = Clock::now())
   {
     std::lock_guard<std::mutex> lock(mutex_);
     refresh(now);
-    return { state_, generation_, departureTelemetryFresh(now), departure_stationary_ };
+    return { state_, generation_, departureTelemetryFresh(now), departure_stationary_, unverified_start_allowed_ };
   }
 
   template <typename Operation>
@@ -378,7 +382,8 @@ public:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     refresh(Clock::now());
-    operation(Readiness{ state_, generation_, departureTelemetryFresh(Clock::now()), departure_stationary_ });
+    operation(Readiness{ state_, generation_, departureTelemetryFresh(Clock::now()), departure_stationary_,
+               unverified_start_allowed_ });
   }
 
 private:
@@ -427,6 +432,11 @@ private:
     have_info_ = true;
     info_received_ = now;
     last_reply_after_latest_query_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(now - queried_).count();
+    if (info_.forced || info_.shutdown_countdown != 0 || info_.state != DockInfo::State::Undocked)
+    {
+      std::lock_guard<std::mutex> state_lock(mutex_);
+      inhibitUnverifiedStart();
+    }
     if (info_.forced || info_.shutdown_countdown != 0)
     {
       update(Feedback::Unknown);
@@ -450,6 +460,15 @@ private:
     if (state_ != next)
     {
       state_ = next;
+      ++generation_;
+    }
+  }
+
+  void inhibitUnverifiedStart()
+  {
+    if (unverified_start_allowed_)
+    {
+      unverified_start_allowed_ = false;
       ++generation_;
     }
   }
@@ -481,6 +500,7 @@ private:
   TimePoint received_{};
   TimePoint started_{};
   bool have_feedback_{ false };
+  bool unverified_start_allowed_{ false };
   unsigned long long generation_{ 0 };
   TimePoint departure_telemetry_received_{};
   bool departure_contact_confirmed_{ false }, departure_have_telemetry_{ false }, departure_stationary_{ false };

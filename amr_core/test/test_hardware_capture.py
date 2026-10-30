@@ -25,7 +25,7 @@ def load_module(name, filename):
 def test_robot_settings_returns_valid_connection_and_driver_or_fails_closed(tmp_path, port):
     fixtures = load_module('hardware_settings_fixtures', 'test_configuration.py')
     robot = {'ip': 'offline', 'port': port, 'user': 'test-user', 'password': 'test-only'}
-    driver = {'min_linear_speed': -100, 'max_linear_speed': 1000, 'ratio_mapping': 'legacy'}
+    driver = {'cmd_vel': {'min_linear': -100, 'max_linear': 1000}, 'drive': {'ratio_mapping': 'legacy'}}
     parameters = tmp_path / 'parameters.yaml'
     parameters.write_text(fixtures.yaml.safe_dump({
         'amr_core': {'ros__parameters': {'robot': robot, 'driver': driver}},
@@ -114,7 +114,7 @@ def test_mapping_assessment_keeps_reverse_gain_separate_from_speed_limit():
     snapshot = mapping_snapshot()
     original = json.dumps(snapshot, sort_keys=True)
     assessment = fixtures.ratio_mapping_assessment(
-        snapshot, {'min_linear_speed': -100, 'max_linear_speed': 1200, 'ratio_mapping': 'legacy'})
+        snapshot, {'cmd_vel': {'min_linear': -100, 'max_linear': 1200}, 'drive': {'ratio_mapping': 'legacy'}})
     assert assessment['candidate_calibration']['full_throttle_forward_mm_s'] == 1000
     assert assessment['candidate_calibration']['full_throttle_reverse_mm_s'] == 250
     assert assessment['reported_platform_limits']['reverse_mm_s'] == -100

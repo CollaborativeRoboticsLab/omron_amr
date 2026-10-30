@@ -80,7 +80,7 @@ TEST_F(DriverInterfaceLoopbackTest, CoreNodeMapServerUsesConfiguredServiceName)
     execl(AMR_CORE_EXECUTABLE, AMR_CORE_EXECUTABLE, "--ros-args", "-r", "__ns:=/map_test", "-p",
           "robot.ip:=127.0.0.1", "-p", port_argument.c_str(), "-p", "robot.user:=loopback", "-p",
           "robot.protocol:=6MTX", "-p", "status.publish:=false", "-p", "laser.main_laser.enabled:=false", "-p",
-          "driver.publish_robot_tf:=false", "-p", "map.ros_service.enabled:=true", "-p",
+          "driver.tf.enabled:=false", "-p", "map.ros_service.enabled:=true", "-p",
           "map.ros_service.name:=custom_active_map", static_cast<char*>(nullptr));
     _exit(127);
   }

@@ -82,8 +82,8 @@ def ratio_mapping_assessment(snapshot, driver=None):
 
     if driver is not None:
         try:
-            minimum = driver['min_linear_speed']
-            maximum = driver['max_linear_speed']
+            minimum = driver['cmd_vel']['min_linear']
+            maximum = driver['cmd_vel']['max_linear']
             if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
                    for value in (minimum, maximum)) or minimum > 0 or maximum <= 0:
                 raise ValueError()
@@ -91,7 +91,7 @@ def ratio_mapping_assessment(snapshot, driver=None):
                 assessment['blockers'].append('Local reverse limit exceeds the reported robot reverse limit.')
             if maximum > forward_limit:
                 assessment['blockers'].append('Local forward limit exceeds the reported robot forward limit.')
-            if driver.get('ratio_mapping') == 'legacy':
+            if driver.get('drive', {}).get('ratio_mapping') == 'legacy':
                 cutoff = max(abs(minimum), maximum) * translation_dead_zone / 100000
                 assessment['legacy_translation_dead_zone_mps'] = cutoff
                 assessment['legacy_reverse_representable'] = abs(minimum) / 1000 > cutoff

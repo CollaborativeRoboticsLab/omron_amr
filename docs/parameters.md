@@ -53,10 +53,11 @@ The published angle increment is inferred from the packet when enough points are
 
 ## `driver.*`
 
-- `driver.odom_topic`: odometry topic name.
-- `driver.cmd_vel_topic`: velocity command topic consumed by `amr_core`.
-- `driver.stop_topic`: stop command topic.
-- `driver.drive_ready_topic`: mode and docking readiness status topic, default `amr/drive_ready` (`std_msgs/Bool`). A fresh `true` indicates those gates are open; it does not acknowledge command delivery, indicate that no stop is pending, or certify physical safety. Treat missing or stale updates as not ready.
+- `driver.odom.topic`: odometry topic name.
+- `driver.cmd_vel.topic`: velocity command topic consumed by `amr_core`.
+- `driver.stop.topic`: stop command topic.
+- `driver.drive.ready_topic`: mode and docking readiness status topic, default `amr/drive_ready` (`std_msgs/Bool`). A fresh `true` indicates those gates are open; with `driver.docking.start_from_dock: false`, this can occur without docking feedback. It does not acknowledge command delivery, indicate that no stop is pending, or certify physical safety. Treat missing or stale updates as not ready.
+- `driver.docking.start_from_dock`: startup-only setting, default `true`. When `false`, the operator asserts that the robot starts away from a dock and velocity may be enabled even with missing docking feedback, once drive mode is confirmed. Physically verify the robot is clear of the dock and cable before using this setting; it is not a sensor check or safety-rated protection, and motion may otherwise be enabled while physically docked. Observed docking, forced state, or shutdown feedback revokes this exception for the rest of the driver run, including after feedback becomes stale; docking failures remain inhibited. Undock, shutdown, and fault acknowledgement retain their separate authorization and feedback requirements. Restart the driver after changing this setting.
 - `shutdown.enabled`: default `false`. When enabled, exposes the relative `shutdown_robot` `std_srvs/Trigger` service and requires an advertised `shutdownRobot` command, managed docking, `docking.contact_dock_confirmed: true`, and `shutdown.exclusive_control_confirmed: true`.
 - `shutdown.exclusive_control_confirmed`: default `false`; an operator confirmation that no other controller can command the robot during shutdown. This setting does not enforce exclusive control or provide a safety function.
 - `fault.ros_service.enabled`: default `false`. Exposes the named `amr_msgs/srv/AcknowledgeFault` service. Requires advertised `acknowledgeFault`, managed docking, `docking.contact_dock_confirmed` and `fault.ack.exclusive_control_confirmed` set to true.
@@ -73,21 +74,20 @@ For a separately authorized upload, `amr_hardware_probe map-upload` reads the ro
 `amr_hardware_probe map-download` accepts the same seven stdin fields as `map-upload-named`, with the sixth field specifying a new local output path and the seventh the remote filename. It saves the downloaded bytes without overwriting an existing file and reports whether ARIA can parse them; an unparseable file is still saved for inspection.
 
 `amr_hardware_probe map-activate` reads connection fields, the expected local map path, the remote target name, and the expected currently active name on stdin. It compares the remote file, checks active and configured names and fresh docked/stationary feedback, sends one map-selection transaction, and verifies both names afterward. A failed or missing receipt leaves the outcome unverified and must not be blindly retried. Activation can disrupt localization; docked status and this guard do not establish movement safety.
-- `driver.publish_odom`: enables odometry publication from `amr_core`.
-- `driver.publish_robot_tf`: enables the `odom -> base_link` TF publisher.
-- `driver.odom_frame`: frame id assigned to published odometry.
-- `driver.base_frame`: child frame id assigned to published odometry and TF.
-- `driver.expected_cmd_vel_freq`: deprecated compatibility parameter, still accepted but no longer controls a watchdog timer or transmission rate.
-- `driver.send_frequency`: maximum normal drive packet generation rate in Hz, default `20.0`. Must be finite, positive, and representable by the steady clock. Delayed networking cycles do not produce catch-up bursts. A newly requested stop bypasses this rate gate; failed stop submissions retry at this rate.
-- `driver.tcp_queue_max_packets`: maximum pending finalized TCP packets, default `32`. Must be positive. Applies to control and motion packets together.
-- `driver.tcp_queue_max_bytes`: maximum retained packet bytes and maximum SDK staging batch size, default `65536`. Must be positive. Partially written packets retain their full byte budget until complete.
-- `driver.tcp_queue_max_age_sec`: absolute maximum pending TCP packet age, default `0.1` seconds. Must be finite, positive, and no greater than `cmd_vel_timeout_sec`. Staging time counts toward this budget; partial-write progress does not refresh it. This is a separate transport budget, not an end-to-end command-age guarantee.
-- `driver.min_linear_speed`: minimum linear speed clamp in mm/s.
-- `driver.max_linear_speed`: maximum linear speed clamp in mm/s.
-- `driver.min_angular_speed`: minimum angular speed clamp in deg/s.
-- `driver.max_angular_speed`: maximum angular speed clamp in deg/s.
-- `driver.drive_throttle_pct`: throttle scaling applied to outgoing drive commands.
-- `driver.ratio_mapping`: `legacy` (default, warns that it is uncalibrated) or opt-in `aria_ratio_v1`. The latter implements the bundled SDK model, not an automatically verified contract with the installed firmware.
+- `driver.odom.publish`: enables odometry publication from `amr_core`.
+- `driver.tf.enabled`: enables the `odom -> base_link` TF publisher.
+- `driver.odom.frame_id`: frame id assigned to published odometry.
+- `driver.tf.base_frame`: child frame id assigned to published odometry and TF.
+- `driver.drive.send_frequency`: maximum normal drive packet generation rate in Hz, default `20.0`. Must be finite, positive, and representable by the steady clock. Delayed networking cycles do not produce catch-up bursts. A newly requested stop bypasses this rate gate; failed stop submissions retry at this rate.
+- `driver.network.tcp_queue_max_packets`: maximum pending finalized TCP packets, default `32`. Must be positive. Applies to control and motion packets together.
+- `driver.network.tcp_queue_max_bytes`: maximum retained packet bytes and maximum SDK staging batch size, default `65536`. Must be positive. Partially written packets retain their full byte budget until complete.
+- `driver.network.tcp_queue_max_age_sec`: absolute maximum pending TCP packet age, default `0.1` seconds. Must be finite, positive, and no greater than `cmd_vel_timeout_sec`. Staging time counts toward this budget; partial-write progress does not refresh it. This is a separate transport budget, not an end-to-end command-age guarantee.
+- `driver.cmd_vel.min_linear`: minimum linear speed clamp in mm/s.
+- `driver.cmd_vel.max_linear`: maximum linear speed clamp in mm/s.
+- `driver.cmd_vel.min_angular`: minimum angular speed clamp in deg/s.
+- `driver.cmd_vel.max_angular`: maximum angular speed clamp in deg/s.
+- `driver.drive.throttle_pct`: throttle scaling applied to outgoing drive commands.
+- `driver.drive.ratio_mapping`: `legacy` (default, warns that it is uncalibrated) or opt-in `aria_ratio_v1`. The latter implements the bundled SDK model, not an automatically verified contract with the installed firmware.
 - `driver.calibration.confirmed`: must be `true` to use `aria_ratio_v1`. Operator attestation that the installed firmware formula, units, packet schema, and effective settings have been checked; this is not physical tracking certification.
 - `driver.calibration.source`: required nonblank export/revision identifier in calibrated mode. Include robot identity, firmware revision, capture date, and configuration hash. Logged at startup; never include credentials.
 - `driver.calibration.full_throttle_forward_mm_s`: resolved firmware forward speed at full ratio and 100% throttle, positive mm/s. Separate from the permitted `max_linear_speed`.
@@ -98,10 +98,10 @@ For a separately authorized upload, `amr_hardware_probe map-upload` reads the ro
 - `driver.calibration.translation_dead_zone_pct`: actual firmware translation dead zone, finite in `[0, 100)`. Default `-1.0` is deliberately invalid until supplied.
 - `driver.calibration.rotation_dead_zone_pct`: actual firmware rotation dead zone, finite in `[0, 100)`. Default `-1.0` is deliberately invalid until supplied.
 - `driver.calibration.feedback_timeout_sec`: maximum accepted body-speed feedback age, default `0.2` seconds, finite and positive. Steady-clock age at or beyond the limit rejects a speed-dependent turn.
-- `driver.unsafe_drive`: requests libaria unsafe drive mode. Kept `true` intentionally so Nav2 owns normal software obstacle avoidance without competing robot-side lidar/sensor motion limiting. This is separate from emergency stops and independent protective functions, whose firmware behavior must be verified.
-- `driver.mode_check_period_sec`: minimum interval between `getSafeDrive` queries in seconds, default `0.5`. Must be finite and positive. Only one query is outstanding at a time.
-- `driver.mode_confirmation_timeout_sec`: maximum age of a matching mode confirmation in seconds, default `2.0`. Also bounds the startup mode handshake. Must be finite and greater than `mode_check_period_sec`. Uses steady time, independently of ROS executor progress.
-- `driver.cmd_vel_timeout_sec`: maximum accepted-command age in seconds, default `0.2`. Must be finite, positive, and representable by the steady clock. Checked in the networking callback independently of ROS time and executor timers. At or beyond this age, the sender invalidates movement and requests stop mode.
+- `driver.drive.unsafe_drive`: requests libaria unsafe drive mode. Kept `true` intentionally so Nav2 owns normal software obstacle avoidance without competing robot-side lidar/sensor motion limiting. This is separate from emergency stops and independent protective functions, whose firmware behavior must be verified.
+- `driver.drive.mode_check_period_sec`: minimum interval between `getSafeDrive` queries in seconds, default `0.5`. Must be finite and positive. Only one query is outstanding at a time.
+- `driver.drive.mode_confirmation_timeout_sec`: maximum age of a matching mode confirmation in seconds, default `2.0`. Also bounds the startup mode handshake. Must be finite and greater than `mode_check_period_sec`. Uses steady time, independently of ROS executor progress.
+- `driver.cmd_vel.timeout_sec`: maximum accepted-command age in seconds, default `0.2`. Must be finite, positive, and representable by the steady clock. Checked in the networking callback independently of ROS time and executor timers. At or beyond this age, the sender invalidates movement and requests stop mode.
 
 The shutdown service accepts one request only when fresh dock feedback reports Docked, no undocking operation is reserved, and fresh telemetry has reported zero velocity continuously for at least 0.5 seconds. These checks are not safety-rated. The service response confirms local acceptance only; the networking loop checks the conditions again and logs whether the command was locally queued. Delivery and power-off are not acknowledged. After acceptance, velocity commands and further shutdown or undock requests are inhibited until the driver restarts, including when submission fails. Explicit stop requests remain available. Test coverage uses a localhost fake server; shutdown on the physical robot is unverified. Restrict ROS service access to authorized operators.
 
@@ -121,7 +121,7 @@ The override usually disables:
 - `status.publish`
 - `laser.main_laser.enabled`
 - `laser.low_laser.enabled`
-- `driver.publish_odom`
-- `driver.publish_robot_tf`
+- `driver.odom.publish`
+- `driver.tf.enabled`
 
 That leaves `amr_core` acting as the command bridge while simulation owns TF, odometry, and sensors.

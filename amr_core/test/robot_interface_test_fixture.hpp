@@ -99,15 +99,15 @@ protected:
     server_started_ = true;
 
     rclcpp::NodeOptions options;
-    options.parameter_overrides({ { "driver.cmd_vel_topic", "/drive_test/cmd_vel" },
-                                  { "driver.odom_topic", "/drive_test/odom" },
-                                  { "driver.stop_topic", "/drive_test/stop" },
-                                  { "driver.publish_robot_tf", false },
-                                  { "driver.send_frequency", 20.0 },
-                                  { "driver.cmd_vel_timeout_sec", 0.5 },
-                                  { "driver.mode_check_period_sec", 0.05 },
-                                  { "driver.mode_confirmation_timeout_sec", 0.3 },
-                                  { "driver.unsafe_drive", true } });
+    options.parameter_overrides({ { "driver.cmd_vel.topic", "/drive_test/cmd_vel" },
+                                  { "driver.odom.topic", "/drive_test/odom" },
+                                  { "driver.stop.topic", "/drive_test/stop" },
+                                  { "driver.tf.enabled", false },
+                                  { "driver.drive.send_frequency", 20.0 },
+                                  { "driver.cmd_vel.timeout_sec", 0.5 },
+                                  { "driver.drive.mode_check_period_sec", 0.05 },
+                                  { "driver.drive.mode_confirmation_timeout_sec", 0.3 },
+                                  { "driver.drive.unsafe_drive", true } });
     node_ = std::make_shared<rclcpp::Node>("drive_interface_test", options);
     docking_ = std::make_shared<amr_core::DockingInterface>(
         [this]() {
@@ -152,8 +152,8 @@ protected:
       return;
     ArNetPacket packet;
     packet.uByteToBuf(fake_docking_state_);
-    packet.uByteToBuf(0);
-    packet.uByte2ToBuf(0);
+    packet.uByteToBuf(fake_docking_forced_);
+    packet.uByte2ToBuf(fake_docking_shutdown_countdown_);
     client->sendPacketTcp(&packet);
   }
 
@@ -295,7 +295,7 @@ protected:
 
   void configureCalibration(bool confirmed = true)
   {
-    node_->declare_parameter<std::string>("driver.ratio_mapping", "aria_ratio_v1");
+    node_->declare_parameter<std::string>("driver.drive.ratio_mapping", "aria_ratio_v1");
     node_->declare_parameter<bool>("driver.calibration.confirmed", confirmed);
     node_->declare_parameter<std::string>("driver.calibration.source", "loopback:test-only");
     node_->declare_parameter<double>("driver.calibration.full_throttle_forward_mm_s", 2000.0);
@@ -388,9 +388,9 @@ protected:
 
   void checkVelocityStream(double linear, double angular)
   {
-    node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
-    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 0.2));
-    node_->declare_parameter<double>("driver.min_linear_speed", -200.0);
+    node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 0.2);
+    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 0.2));
+    node_->declare_parameter<double>("driver.cmd_vel.min_linear", -200.0);
     auto stop_publisher = node_->create_publisher<std_msgs::msg::Empty>("/drive_test/stop", 10);
     initializeDriver();
     ASSERT_TRUE(waitWithExecutor([&stop_publisher]() { return stop_publisher->get_subscription_count() > 0; }));
@@ -427,8 +427,8 @@ protected:
 
   void initializeSmootherChain()
   {
-    node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
-    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 0.2));
+    node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 0.2);
+    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 0.2));
     initializeDriver();
     rclcpp::NodeOptions options;
     options.arguments({ "--ros-args", "-r", "__ns:=/drive_chain_test", "-r", "cmd_vel:=/drive_chain_test/cmd_vel_nav",
@@ -511,8 +511,8 @@ protected:
       std::lock_guard<std::mutex> lock(mutex_);
       telemetry_ = { 1200, -2300, initial_heading, 1000, 15, 0 };
     }
-    node_->declare_parameter<std::string>("driver.odom_frame", "drive_test/odom");
-    node_->declare_parameter<std::string>("driver.base_frame", "drive_test/base_link");
+    node_->declare_parameter<std::string>("driver.odom.frame_id", "drive_test/odom");
+    node_->declare_parameter<std::string>("driver.tf.base_frame", "drive_test/base_link");
     nav_msgs::msg::Odometry::SharedPtr received;
     auto subscription = node_->create_subscription<nav_msgs::msg::Odometry>(
         "/drive_test/odom", 10,
@@ -521,8 +521,8 @@ protected:
     rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_subscription;
     if (check_tf)
     {
-      node_->declare_parameter<bool>("driver.publish_robot_tf", true);
-      node_->set_parameter(rclcpp::Parameter("driver.publish_robot_tf", true));
+      node_->declare_parameter<bool>("driver.tf.enabled", true);
+      node_->set_parameter(rclcpp::Parameter("driver.tf.enabled", true));
       tf_subscription = node_->create_subscription<tf2_msgs::msg::TFMessage>(
           "/tf", 100, [&transforms](const tf2_msgs::msg::TFMessage& message) {
             for (const auto& transform : message.transforms)
@@ -618,6 +618,8 @@ protected:
   std::string uploaded_map_;
   bool corrupt_map_readback_{ false };
   int fake_docking_state_{ 2 };
+  bool fake_docking_forced_{ false };
+  unsigned short fake_docking_shutdown_countdown_{ 0 };
   bool suppress_docking_replies_{ false };
   bool suppress_docking_after_undock_{ false };
   bool server_started_{ false };

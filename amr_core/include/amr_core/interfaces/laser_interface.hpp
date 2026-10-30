@@ -126,7 +126,7 @@ public:
                                                           });
     validateLaserDeviceConfig(low_laser_, "laser.low_laser");
 
-    base_frame_ = getOrDeclareParameter<std::string>("driver.base_frame", "base_link");
+    base_frame_ = getOrDeclareParameter<std::string>("driver.tf.base_frame", "base_link");
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node_->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, node_, true);
 

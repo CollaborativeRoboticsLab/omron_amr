@@ -1,5 +1,36 @@
 #include "robot_interface_test_fixture.hpp"
 
+TEST_F(DriverInterfaceLoopbackTest, ShippedYamlConfiguresDriverTopicsLimitsAndTf)
+{
+  driver_.reset();
+  executor_.remove_node(node_);
+  publisher_.reset();
+  const auto yaml = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+                    "amr_ros/config/ld250_parameters.yaml";
+  rclcpp::NodeOptions options;
+  options.arguments({ "--ros-args", "--params-file", yaml.string(), "-p", "driver.tf.enabled:=false" });
+  node_ = std::make_shared<rclcpp::Node>("amr_core", options);
+  executor_.add_node(node_);
+  publisher_ = node_->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
+  auto stop_publisher = node_->create_publisher<std_msgs::msg::Empty>("stop", 1);
+  bool received_odom = false;
+  bool received_tf = false;
+  auto odom_subscription = node_->create_subscription<nav_msgs::msg::Odometry>(
+      "odom", 10, [&received_odom](const nav_msgs::msg::Odometry&) { received_odom = true; });
+  auto tf_subscription = node_->create_subscription<tf2_msgs::msg::TFMessage>(
+      "/tf", 10, [&received_tf](const tf2_msgs::msg::TFMessage&) { received_tf = true; });
+  driver_ = std::make_unique<DriverInterface>(node_, docking_);
+  initializeDriver();
+  ASSERT_TRUE(waitWithExecutor([&stop_publisher, &received_odom]() {
+    return stop_publisher->get_subscription_count() > 0 && received_odom;
+  }));
+  publish(-0.5, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-20.0, 0.0); }));
+  const auto started = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([started]() { return std::chrono::steady_clock::now() - started > 300ms; }));
+  EXPECT_FALSE(received_tf);
+}
+
 TEST_F(DriverInterfaceLoopbackTest, StreamsForwardThenStops)
 {
   checkVelocityStream(0.5, 0.0);
@@ -32,8 +63,8 @@ TEST_F(DriverInterfaceLoopbackTest, StreamsForwardRightThenStops)
 
 TEST_F(DriverInterfaceLoopbackTest, ForwardHalfMetreCommandStopsWithoutResuming)
 {
-  node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 0.2);
-  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 0.2));
+  node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 0.2);
+  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 0.2));
   auto stop_publisher = node_->create_publisher<std_msgs::msg::Empty>("/drive_test/stop", 10);
   initializeDriver();
   ASSERT_TRUE(waitWithExecutor([&stop_publisher]() { return stop_publisher->get_subscription_count() > 0; }));
@@ -165,7 +196,7 @@ TEST_F(DriverInterfaceLoopbackTest, CalibratesReverseIndependentlyOfPermittedSpe
 TEST_F(DriverInterfaceLoopbackTest, CalibratesThrottleAndTurningUsingBodySpeedFeedback)
 {
   configureCalibration();
-  node_->declare_parameter<double>("driver.drive_throttle_pct", 50.0);
+  node_->declare_parameter<double>("driver.drive.throttle_pct", 50.0);
   initializeDriver();
   publish(0.6, M_PI / 12.0);
   ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 100.0 * 15.0 / 22.5); }));
@@ -183,7 +214,7 @@ TEST_F(DriverInterfaceLoopbackTest, RejectsUnconfirmedCalibrationBeforeConnectin
 TEST_F(DriverInterfaceLoopbackTest, UsesCalibrationFeedbackWhenOdometryPublicationIsDisabled)
 {
   configureCalibration();
-  node_->declare_parameter<bool>("driver.publish_odom", false);
+  node_->declare_parameter<bool>("driver.odom.publish", false);
   initializeDriver();
   publish(0.6, 0.2);
   ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(30.0, 0.2 * 180.0 / M_PI / 45.0 * 100.0); }));
@@ -239,7 +270,7 @@ TEST_F(DriverInterfaceLoopbackTest, StopsInsteadOfBoostingAnUnrepresentableSmall
 
 TEST_F(DriverInterfaceLoopbackTest, ZeroLegacyThrottleStreamsZeroRatios)
 {
-  node_->declare_parameter<double>("driver.drive_throttle_pct", 0.0);
+  node_->declare_parameter<double>("driver.drive.throttle_pct", 0.0);
   initializeDriver();
   publish(0.6, 0.2);
   ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(0.0, 0.0); }));
@@ -254,7 +285,7 @@ TEST_F(DriverInterfaceLoopbackTest, ZeroLegacyThrottleStreamsZeroRatios)
 TEST_F(DriverInterfaceLoopbackTest, RejectsNonzeroCalibratedTargetAtZeroThrottle)
 {
   configureCalibration();
-  node_->declare_parameter<double>("driver.drive_throttle_pct", 0.0);
+  node_->declare_parameter<double>("driver.drive.throttle_pct", 0.0);
   initializeDriver();
   publish(0.6, 0.0);
   ASSERT_TRUE(waitWithExecutor([this]() {
@@ -389,8 +420,8 @@ TEST_F(DriverInterfaceLoopbackTest, StopsAndLatchesOffWhenModeChangesWithoutForc
 
 TEST_F(DriverInterfaceLoopbackTest, StopsWhenModeRepliesCeaseWithoutRosExecutorProgress)
 {
-  node_->declare_parameter<double>("driver.cmd_vel_timeout_sec", 3.0);
-  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel_timeout_sec", 3.0));
+  node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 3.0);
+  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 3.0));
   initializeDriver();
   publish(0.6, 0.0);
   ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));

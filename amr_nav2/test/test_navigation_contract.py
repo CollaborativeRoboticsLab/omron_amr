@@ -125,7 +125,7 @@ def test_hardware_namespace_scopes_nodes_parameters_and_default_topics(monkeypat
         resolved = parameter.evaluate(context)
         config = yaml.safe_load(Path(resolved).read_text())
         params = config[expected]['amr_core'] if expected else config['amr_core']
-        assert params['ros__parameters']['driver']['unsafe_drive'] is True
+        assert params['ros__parameters']['driver']['drive']['unsafe_drive'] is True
         assert params['ros__parameters']['driver']['calibration']['confirmed'] is False
 
 
@@ -195,7 +195,7 @@ def test_two_hardware_namespaces_load_overlays_and_isolate_commands(monkeypatch,
     monkeypatch.setattr(module, 'Node', lambda **kwargs: captured.append(kwargs) or kwargs)
     overlay = tmp_path / 'overlay.yaml'
     overlay.write_text(yaml.safe_dump({'amr_core': {'ros__parameters': {
-        'driver': {'send_frequency': 17.0}}}}))
+        'driver': {'drive': {'send_frequency': 17.0}}}}}))
     context = Context()
     rclpy.init(context=context, domain_id=190 + os.getpid() % 20)
     executor = SingleThreadedExecutor(context=context)
@@ -222,10 +222,10 @@ def test_two_hardware_namespaces_load_overlays_and_isolate_commands(monkeypatch,
                 automatically_declare_parameters_from_overrides=True)
             nodes.append(node)
             executor.add_node(node)
-            assert node.get_parameter('driver.send_frequency').value == 17.0
-            assert node.get_parameter('driver.unsafe_drive').value is True
+            assert node.get_parameter('driver.drive.send_frequency').value == 17.0
+            assert node.get_parameter('driver.drive.unsafe_drive').value is True
             assert node.get_parameter('driver.calibration.confirmed').value is False
-            for parameter, topic in (('cmd_vel_topic', 'cmd_vel'), ('odom_topic', 'odom'), ('stop_topic', 'stop')):
+            for parameter, topic in (('cmd_vel.topic', 'cmd_vel'), ('odom.topic', 'odom'), ('stop.topic', 'stop')):
                 assert node.resolve_topic_name(node.get_parameter('driver.' + parameter).value) == f'/{namespace}/{topic}'
             assert node.resolve_topic_name('/tf') == f'/{namespace}/tf'
             assert node.resolve_topic_name('/tf_static') == f'/{namespace}/tf_static'
@@ -347,14 +347,15 @@ def test_controller_and_smoother_limits_fit_both_driver_configurations():
     for filename in ('parameters.yaml', 'ld250_parameters.yaml'):
         hardware = yaml.safe_load((PACKAGE.parent / 'amr_ros' / 'config' / filename).read_text())
         driver = hardware['amr_core']['ros__parameters']['driver']
-        assert smoother['max_velocity'][0] <= driver['max_linear_speed'] / 1000.0
-        assert smoother['min_velocity'][0] >= driver['min_linear_speed'] / 1000.0
-        assert smoother['max_velocity'][2] <= math.radians(driver['max_angular_speed'])
-        assert smoother['min_velocity'][2] >= math.radians(driver['min_angular_speed'])
-        assert controller['controller_frequency'] == smoother['smoothing_frequency'] == driver['send_frequency']
-        assert 1.0 / smoother['smoothing_frequency'] < driver['cmd_vel_timeout_sec']
-        assert driver['cmd_vel_topic'] == 'cmd_vel'
-        assert driver['unsafe_drive'] is True
+        cmd_vel = driver['cmd_vel']
+        assert smoother['max_velocity'][0] <= cmd_vel['max_linear'] / 1000.0
+        assert smoother['min_velocity'][0] >= cmd_vel['min_linear'] / 1000.0
+        assert smoother['max_velocity'][2] <= math.radians(cmd_vel['max_angular'])
+        assert smoother['min_velocity'][2] >= math.radians(cmd_vel['min_angular'])
+        assert controller['controller_frequency'] == smoother['smoothing_frequency'] == driver['drive']['send_frequency']
+        assert 1.0 / smoother['smoothing_frequency'] < cmd_vel['timeout_sec']
+        assert cmd_vel['topic'] == 'cmd_vel'
+        assert driver['drive']['unsafe_drive'] is True
 
 
 def test_navigation_odometry_topics_agree_for_the_default_unnamespaced_launch():
@@ -363,7 +364,7 @@ def test_navigation_odometry_topics_agree_for_the_default_unnamespaced_launch():
     assert params['velocity_smoother']['ros__parameters']['odom_topic'] == 'odom'
     for filename in ('parameters.yaml', 'ld250_parameters.yaml'):
         hardware = yaml.safe_load((PACKAGE.parent / 'amr_ros' / 'config' / filename).read_text())
-        assert hardware['amr_core']['ros__parameters']['driver']['odom_topic'] == 'odom'
+        assert hardware['amr_core']['ros__parameters']['driver']['odom']['topic'] == 'odom'
 
 
 def test_reverse_limits_match_read_only_robot_configuration():
@@ -372,12 +373,12 @@ def test_reverse_limits_match_read_only_robot_configuration():
     for filename in ('parameters.yaml', 'ld250_parameters.yaml'):
         hardware = yaml.safe_load((PACKAGE.parent / 'amr_ros' / 'config' / filename).read_text())
         driver = hardware['amr_core']['ros__parameters']['driver']
-        assert driver['min_linear_speed'] == -100.0
-        assert driver['max_linear_speed'] == 1000.0
-        assert smoother['max_velocity'][0] == driver['max_linear_speed'] / 1000.0
-        assert driver['ratio_mapping'] == 'legacy'
+        assert driver['cmd_vel']['min_linear'] == -100.0
+        assert driver['cmd_vel']['max_linear'] == 1000.0
+        assert smoother['max_velocity'][0] == driver['cmd_vel']['max_linear'] / 1000.0
+        assert driver['drive']['ratio_mapping'] == 'legacy'
         assert driver['calibration']['confirmed'] is False
-        assert driver['unsafe_drive'] is True
+        assert driver['drive']['unsafe_drive'] is True
 
 
 def test_installed_smoother_publishes_reliable_twist_on_isolated_localhost(monkeypatch):

@@ -105,24 +105,23 @@ public:
     password_ = password;
     protocol_ = protocol;
 
-    odom_topic_ = getOrDeclareParameter<std::string>("driver.odom_topic", "amr/odom");
-    cmd_vel_topic_ = getOrDeclareParameter<std::string>("driver.cmd_vel_topic", "amr/cmd_vel");
-    stop_topic_ = getOrDeclareParameter<std::string>("driver.stop_topic", "amr/stop");
-    drive_ready_topic_ = getOrDeclareParameter<std::string>("driver.drive_ready_topic", "amr/drive_ready");
-    publish_odom_ = getOrDeclareParameter<bool>("driver.publish_odom", true);
-    publish_robot_tf_ = getOrDeclareParameter<bool>("driver.publish_robot_tf", true);
+    odom_topic_ = getOrDeclareParameter<std::string>("driver.odom.topic", "amr/odom");
+    cmd_vel_topic_ = getOrDeclareParameter<std::string>("driver.cmd_vel.topic", "amr/cmd_vel");
+    stop_topic_ = getOrDeclareParameter<std::string>("driver.stop.topic", "amr/stop");
+    drive_ready_topic_ = getOrDeclareParameter<std::string>("driver.drive.ready_topic", "amr/drive_ready");
+    publish_odom_ = getOrDeclareParameter<bool>("driver.odom.publish", true);
+    publish_robot_tf_ = getOrDeclareParameter<bool>("driver.tf.enabled", true);
 
-    odom_frame_ = getOrDeclareParameter<std::string>("driver.odom_frame", "amr/odom");
-    base_frame_ = getOrDeclareParameter<std::string>("driver.base_frame", "amr/base_link");
+    odom_frame_ = getOrDeclareParameter<std::string>("driver.odom.frame_id", "amr/odom");
+    base_frame_ = getOrDeclareParameter<std::string>("driver.tf.base_frame", "amr/base_link");
 
-    expected_cmd_vel_freq_ = getOrDeclareParameter<double>("driver.expected_cmd_vel_freq", 20.0);
-    drive_send_frequency_ = getOrDeclareParameter<double>("driver.send_frequency", 20.0);
-    min_ang_speed_ = getOrDeclareParameter<double>("driver.min_angular_speed", -60.0);  // deg/s
-    max_ang_speed_ = getOrDeclareParameter<double>("driver.max_angular_speed", 60.0);   // deg/s
-    min_lin_speed_ = getOrDeclareParameter<double>("driver.min_linear_speed", -100.0);  // mm/s
-    max_lin_speed_ = getOrDeclareParameter<double>("driver.max_linear_speed", 1000.0);  // mm/s
-    drive_throttle_pct_ = getOrDeclareParameter<double>("driver.drive_throttle_pct", 100.0);
-    unsafe_drive_ = getOrDeclareParameter<bool>("driver.unsafe_drive", true);
+    drive_send_frequency_ = getOrDeclareParameter<double>("driver.drive.send_frequency", 20.0);
+    min_ang_speed_ = getOrDeclareParameter<double>("driver.cmd_vel.min_angular", -60.0);  // deg/s
+    max_ang_speed_ = getOrDeclareParameter<double>("driver.cmd_vel.max_angular", 60.0);  // deg/s
+    min_lin_speed_ = getOrDeclareParameter<double>("driver.cmd_vel.min_linear", -100.0);  // mm/s
+    max_lin_speed_ = getOrDeclareParameter<double>("driver.cmd_vel.max_linear", 1000.0);  // mm/s
+    drive_throttle_pct_ = getOrDeclareParameter<double>("driver.drive.throttle_pct", 100.0);
+    unsafe_drive_ = getOrDeclareParameter<bool>("driver.drive.unsafe_drive", true);
     const bool shutdown_enabled = getOrDeclareParameter<bool>("shutdown.enabled", false);
     const bool fault_service_enabled = getOrDeclareParameter<bool>("fault.ros_service.enabled", false);
     const auto fault_service_name = getOrDeclareParameter<std::string>("fault.ros_service.name", "acknowledge_fault");
@@ -144,9 +143,9 @@ public:
         !getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false) ||
         !getOrDeclareParameter<bool>("fault.ack.exclusive_control_confirmed", false)))
       throw std::invalid_argument("Fault acknowledgement requires managed contact docking and exclusive control confirmation");
-    cmd_vel_timeout_sec_ = getOrDeclareParameter<double>("driver.cmd_vel_timeout_sec", 0.2);
-    mode_check_period_sec_ = getOrDeclareParameter<double>("driver.mode_check_period_sec", 0.5);
-    mode_confirmation_timeout_sec_ = getOrDeclareParameter<double>("driver.mode_confirmation_timeout_sec", 2.0);
+    cmd_vel_timeout_sec_ = getOrDeclareParameter<double>("driver.cmd_vel.timeout_sec", 0.2);
+    mode_check_period_sec_ = getOrDeclareParameter<double>("driver.drive.mode_check_period_sec", 0.5);
+    mode_confirmation_timeout_sec_ = getOrDeclareParameter<double>("driver.drive.mode_confirmation_timeout_sec", 2.0);
     if (!std::isfinite(min_lin_speed_) || !std::isfinite(max_lin_speed_) ||
         !std::isfinite(min_ang_speed_) || !std::isfinite(max_ang_speed_) ||
         min_lin_speed_ > 0.0 || max_lin_speed_ <= 0.0 ||
@@ -163,9 +162,9 @@ public:
     command_policy_ = std::make_unique<amr_core::DriveCommandPolicy>(drive_send_frequency_, cmd_vel_timeout_sec_);
     configureRatioMapping();
 
-    const auto queue_packets = getOrDeclareParameter<int64_t>("driver.tcp_queue_max_packets", 32);
-    const auto queue_bytes = getOrDeclareParameter<int64_t>("driver.tcp_queue_max_bytes", 65536);
-    const auto queue_age = getOrDeclareParameter<double>("driver.tcp_queue_max_age_sec", 0.1);
+    const auto queue_packets = getOrDeclareParameter<int64_t>("driver.network.tcp_queue_max_packets", 32);
+    const auto queue_bytes = getOrDeclareParameter<int64_t>("driver.network.tcp_queue_max_bytes", 65536);
+    const auto queue_age = getOrDeclareParameter<double>("driver.network.tcp_queue_max_age_sec", 0.1);
     if (queue_packets <= 0 || queue_bytes <= 0 || !std::isfinite(queue_age) || queue_age <= 0.0 ||
         queue_age > cmd_vel_timeout_sec_ ||
         !client_.configureTransport(static_cast<std::size_t>(queue_packets), static_cast<std::size_t>(queue_bytes),
@@ -211,8 +210,11 @@ public:
     configureHandlers();
     if (manage_docking_)
     {
+      const bool start_from_dock = getOrDeclareParameter<bool>("driver.docking.start_from_dock", true);
+      if (!start_from_dock)
+        RCLCPP_WARN(node_->get_logger(), "Starting away from dock is asserted; docking feedback may be unavailable");
       docking_ = std::make_shared<amr_core::DockingInterface>(amr_core::DockingInterface::UndockRequest{}, 1.0,
-          getOrDeclareParameter<double>("docking.undock_timeout_sec", 30.0));
+          getOrDeclareParameter<double>("docking.undock_timeout_sec", 30.0), start_from_dock);
       docking_->attach(client_, getOrDeclareParameter<bool>("docking.contact_dock_confirmed", false));
     }
     configureDriveMode();
@@ -257,13 +259,19 @@ public:
             response->message = "Accepted locally; fault acknowledgement and clearance are not confirmed";
           });
     }
-    if (docking_->readiness().state != amr_core::DockingInterface::State::Ready)
+    if (!velocityReady(docking_->readiness()))
     {
       RCLCPP_WARN(node_->get_logger(), "Velocity inhibited until fresh docking readiness is verified");
     }
   }
 
 private:
+  static bool velocityReady(const amr_core::DockingInterface::Readiness& readiness)
+  {
+    return readiness.state == amr_core::DockingInterface::State::Ready ||
+           (readiness.state == amr_core::DockingInterface::State::Unknown && readiness.unverified_start_allowed);
+  }
+
   static bool validFaultName(const std::string& name)
   {
     return !name.empty() && name.size() <= 128 &&
@@ -382,7 +390,7 @@ private:
 
   void configureRatioMapping()
   {
-    const auto mode = getOrDeclareParameter<std::string>("driver.ratio_mapping", "legacy");
+    const auto mode = getOrDeclareParameter<std::string>("driver.drive.ratio_mapping", "legacy");
     if (mode == "legacy")
     {
       RCLCPP_WARN(node_->get_logger(),
@@ -391,7 +399,7 @@ private:
     }
     if (mode != "aria_ratio_v1")
     {
-      throw std::invalid_argument("driver.ratio_mapping must be legacy or aria_ratio_v1");
+      throw std::invalid_argument("driver.drive.ratio_mapping must be legacy or aria_ratio_v1");
     }
     const auto confirmed = getOrDeclareParameter<bool>("driver.calibration.confirmed", false);
     const auto source = getOrDeclareParameter<std::string>("driver.calibration.source", "");
@@ -650,7 +658,7 @@ private:
 
     docking_->withReadiness([&](amr_core::DockingInterface::Readiness readiness) {
       const auto now = amr_core::DriveCommandPolicy::Clock::now();
-      if (readiness.state != amr_core::DockingInterface::State::Ready)
+      if (!velocityReady(readiness))
       {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
                              "Ignored cmd_vel: docking readiness is not verified; request undocking explicitly");
@@ -712,7 +720,7 @@ private:
       if (now - last_ready_published_ >= std::chrono::milliseconds(50))
       {
         std_msgs::msg::Bool message;
-        message.data = mode_confirmed_.load() && readiness.state == amr_core::DockingInterface::State::Ready;
+        message.data = mode_confirmed_.load() && velocityReady(readiness);
         drive_ready_pub_->publish(message);
         last_ready_published_ = now;
       }
@@ -755,7 +763,7 @@ private:
       return;
     }
     if (decision.action == amr_core::DriveCommandPolicy::Action::Drive &&
-        (readiness.state != amr_core::DockingInterface::State::Ready ||
+        (!velocityReady(readiness) ||
          command_generation_ != readiness.generation))
     {
       command_policy_->requestStop();
@@ -889,7 +897,6 @@ private:
   std::string odom_frame_{ "odom" };
   std::string base_frame_{ "base_link" };
 
-  double expected_cmd_vel_freq_{ 20.0 };
   double drive_send_frequency_{ 20.0 };
   double min_lin_speed_{ -1000.0 };
   double max_lin_speed_{ 1000.0 };
