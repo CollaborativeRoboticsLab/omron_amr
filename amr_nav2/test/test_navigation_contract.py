@@ -263,6 +263,35 @@ def test_ld250_hardware_wrapper_passes_namespace_to_hardware_and_navigation():
         assert arguments['namespace'].id == 'namespace'
 
 
+def test_ld250_rviz_defaults_on_and_respects_launch_switches(monkeypatch):
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+
+    path = PACKAGE.parent / 'amr_ros' / 'launch' / 'ld250.launch.py'
+    spec = importlib.util.spec_from_file_location('hardware_rviz_launch', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    includes = []
+    original_include = module.IncludeLaunchDescription
+
+    def capture_include(*args, **kwargs):
+        include = original_include(*args, **kwargs)
+        includes.append(include)
+        return include
+
+    monkeypatch.setattr(module, 'IncludeLaunchDescription', capture_include)
+    description = module.generate_launch_description()
+    declarations = [entity for entity in description.entities if isinstance(entity, DeclareLaunchArgument)
+                    and entity.name == 'use_rviz']
+    assert len(declarations) == 1
+    for settings, expected in (({}, True), ({'use_rviz': 'false'}, False), ({'use_rviz': 'true'}, True)):
+        context = LaunchContext()
+        context.launch_configurations.update(settings)
+        for declaration in declarations:
+            declaration.execute(context)
+        assert includes[1].condition.evaluate(context) is expected
+
+
 def test_command_types_and_open_loop_feedback_are_explicit():
     params = navigation_parameters()
     for node in ('controller_server', 'behavior_server', 'velocity_smoother'):

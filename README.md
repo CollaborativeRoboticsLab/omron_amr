@@ -58,25 +58,19 @@ ros2 launch amr_ros amr_core.launch.py
 
 ```sh
 source install/setup.bash
-ros2 launch amr_ros ld250.launch.py
+ros2 launch amr_ros ld250.launch.py use_nav2:=false use_rviz:=false
 ```
 
 ### Start Nav2 SLAM and open the Nav2 RViz view for mapping
 
-The SLAM launch publishes a map with a 1 m unknown border on `map`; the
-unmodified SLAM grid is available on `slam_map_raw`. The default Nav2 planner
-does not plan through unknown space in SLAM mode. Padding does not add obstacle
-observations, and does not establish that navigation is safe. Custom SLAM
-parameters must use the default `/map` topic for this padding pipeline.
+RViz starts by default; pass `use_rviz:=false` to disable it.
+
+The SLAM launch publishes a map with a 1 m unknown border on `map`; the unmodified SLAM grid is available on `slam_map_raw`. The default Nav2 planner does not plan through unknown space in SLAM mode. Padding does not add obstacle observations, and does not establish that navigation is safe. Custom SLAM parameters must use the default `/map` topic for this padding pipeline.
+
 
 ```sh
 source install/setup.bash
-ros2 launch amr_ros ld250.launch.py use_nav2:=true use_slam:=true
-```
-
-```sh
-source install/setup.bash
-ros2 launch amr_nav2 nav2_rviz.launch.py
+ros2 launch amr_ros ld250.launch.py
 ```
 
 ### Start Nav2 localization with a map from amr_nav2/maps and open the Nav2 RViz view
@@ -86,10 +80,18 @@ source install/setup.bash
 ros2 launch amr_ros ld250.launch.py use_nav2:=true use_localization:=true map:=my_map.yaml
 ```
 
+### Undock separately
+
+Navigation and velocity commands do not initiate undocking. With the hardware interface running, undocking is a separate `nav2_msgs/action/UndockRobot` action. It requires verified contact docking, exclusive control, fresh docking feedback, and stationary telemetry. `driver.docking.contact_dock_confirmed` is read at startup; `docking.exclusive_control_confirmed` also defaults to false. Set these confirmations only after verifying the corresponding conditions.
+
+For an explicitly authorized, supervised departure, send one goal:
+
 ```sh
 source install/setup.bash
-ros2 launch amr_nav2 nav2_rviz.launch.py
+ros2 action send_goal /undock_robot nav2_msgs/action/UndockRobot "{dock_type: 'omron', max_undocking_time: 30.0}" --feedback
 ```
+
+Proceed with navigation only after successful action completion and independent confirmation that the robot has stopped and is undocked. Do not retry a failed or uncertain departure automatically; investigate and verify the physical state first. The previously observed stale-feedback failure remains unresolved.
 
 
 ## LD90

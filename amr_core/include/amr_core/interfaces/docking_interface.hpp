@@ -19,18 +19,33 @@ class DockingInterface
 public:
   using Clock = std::chrono::steady_clock;
   using TimePoint = Clock::time_point;
-  enum class State { Unknown, Docked, Undocking, Ready, Failed };
-  enum class Feedback { Unknown, Docked, Undocked, CableConnected };
+  enum class State
+  {
+    Unknown,
+    Docked,
+    Undocking,
+    Ready,
+    Failed
+  };
+  enum class Feedback
+  {
+    Unknown,
+    Docked,
+    Undocked,
+    CableConnected
+  };
   using UndockRequest = std::function<bool()>;
 
   explicit DockingInterface(UndockRequest request = {}, double feedback_timeout_sec = 1.0,
                             double undock_timeout_sec = 30.0, bool start_from_dock = true)
-    : request_(std::move(request)), feedback_timeout_sec_(feedback_timeout_sec),
-      undock_timeout_sec_(undock_timeout_sec), unverified_start_allowed_(!start_from_dock),
-      info_callback_(this, &DockingInterface::handleInfo)
+    : request_(std::move(request))
+    , feedback_timeout_sec_(feedback_timeout_sec)
+    , undock_timeout_sec_(undock_timeout_sec)
+    , unverified_start_allowed_(!start_from_dock)
+    , info_callback_(this, &DockingInterface::handleInfo)
   {
-    if (!std::isfinite(feedback_timeout_sec_) || feedback_timeout_sec_ <= 0.0 ||
-        !std::isfinite(undock_timeout_sec_) || undock_timeout_sec_ <= 0.0)
+    if (!std::isfinite(feedback_timeout_sec_) || feedback_timeout_sec_ <= 0.0 || !std::isfinite(undock_timeout_sec_) ||
+        undock_timeout_sec_ <= 0.0)
     {
       throw std::invalid_argument("Docking timeouts must be positive and finite");
     }
@@ -44,7 +59,8 @@ public:
   void detach()
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    if (client_ && supported_) client_->remHandler("dockInfo", &info_callback_);
+    if (client_ && supported_)
+      client_->remHandler("dockInfo", &info_callback_);
     client_ = nullptr;
     supported_ = false;
     request_ = {};
@@ -54,7 +70,8 @@ public:
   void attach(DriveClient& client, bool contact_confirmed)
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    if (client_) throw std::logic_error("Docking transport is already attached");
+    if (client_)
+      throw std::logic_error("Docking transport is already attached");
     client_ = &client;
     contact_confirmed_ = contact_confirmed;
     {
@@ -66,14 +83,42 @@ public:
                  client.dataExists("updateNumbers") && client.addHandler("dockInfo", &info_callback_);
   }
 
-  bool reserveUndock(bool confirm_contact, bool confirm_exclusive, double max_undocking_time = 30.0)
+  bool reserveUndock(bool confirm_contact, bool confirm_exclusive, double max_undocking_time = 30.0,
+                     const char** rejection_reason = nullptr)
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     const auto now = Clock::now();
-    if (!std::isfinite(max_undocking_time) || max_undocking_time <= 0.0 ||
-      !supported_ || reserved_ || shutdown_reserved_ || !mode_ready_ || !confirm_contact || !confirm_exclusive ||
-        !infoFresh(now) || info_.forced || info_.shutdown_countdown != 0 ||
-        info_.state != DockInfo::State::Docked || !stationary(now) || readiness().state == State::Failed)
+    const char* reason = nullptr;
+    if (!std::isfinite(max_undocking_time) || max_undocking_time <= 0.0)
+      reason = "max_undocking_time must be positive and finite";
+    else if (!supported_)
+      reason = "required docking services are unavailable";
+    else if (reserved_)
+      reason = "another undocking operation is reserved";
+    else if (shutdown_reserved_)
+      reason = "robot shutdown is reserved";
+    else if (!mode_ready_)
+      reason = "drive mode is not confirmed";
+    else if (!confirm_contact && !confirm_exclusive)
+      reason = "driver.docking.contact_dock_confirmed and docking.exclusive_control_confirmed are false";
+    else if (!confirm_contact)
+      reason = "driver.docking.contact_dock_confirmed is false";
+    else if (!confirm_exclusive)
+      reason = "docking.exclusive_control_confirmed is false";
+    else if (!infoFresh(now))
+      reason = "docking feedback is missing or stale";
+    else if (info_.forced)
+      reason = "docking feedback reports forced state";
+    else if (info_.shutdown_countdown != 0)
+      reason = "docking feedback reports a shutdown countdown";
+    else if (info_.state != DockInfo::State::Docked)
+      reason = "docking feedback does not report Docked";
+    else if (!stationary(now))
+      reason = "velocity telemetry is stale or the robot is not stationary";
+    else if (readiness().state == State::Failed)
+      reason = "docking readiness is failed and control remains inhibited";
+    if (rejection_reason) *rejection_reason = reason;
+    if (reason)
     {
       return false;
     }
@@ -90,9 +135,9 @@ public:
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     const auto now = Clock::now();
-    if (shutdown_reserved_ || !supported_ || reserved_ || !contact_confirmed_ || !infoFresh(now) ||
-        info_.forced || info_.shutdown_countdown != 0 || info_.state != DockInfo::State::Docked ||
-        !stationary(now) || readiness(now).state != State::Docked)
+    if (shutdown_reserved_ || !supported_ || reserved_ || !contact_confirmed_ || !infoFresh(now) || info_.forced ||
+        info_.shutdown_countdown != 0 || info_.state != DockInfo::State::Docked || !stationary(now) ||
+        readiness(now).state != State::Docked)
       return false;
     shutdown_reserved_ = true;
     return true;
@@ -122,7 +167,8 @@ public:
   void beginUndock()
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    if (!reserved_ || terminal_) return;
+    if (!reserved_ || terminal_)
+      return;
     contact_confirmed_ = true;
     request_pending_ = true;
   }
@@ -130,9 +176,11 @@ public:
   bool cancelUndock()
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    if (!reserved_ || terminal_) return false;
+    if (!reserved_ || terminal_)
+      return false;
     stop_requested_ = true;
-    if (failure_reason_.empty()) failure_reason_ = "Undocking canceled by caller";
+    if (failure_reason_.empty())
+      failure_reason_ = "Undocking canceled by caller";
     fail();
     return true;
   }
@@ -150,14 +198,19 @@ public:
   OperationStatus operationStatus()
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    return { terminal_, success_, stopped_, have_info_ ? static_cast<std::uint8_t>(info_.state) : std::uint8_t{255},
-             stop_requested_ ? "stopping" : (submitted_ ? "undocking" : "preflight"), message_ };
+    return { terminal_,
+             success_,
+             stopped_,
+             have_info_ ? static_cast<std::uint8_t>(info_.state) : std::uint8_t{ 255 },
+             stop_requested_ ? "stopping" : (submitted_ ? "undocking" : "preflight"),
+             message_ };
   }
 
   void finishUndock()
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    if (terminal_) reserved_ = false;
+    if (terminal_)
+      reserved_ = false;
   }
 
   void observe(const DriveTelemetry& telemetry)
@@ -197,23 +250,26 @@ public:
       {
         fail();
         terminal_ = true;
-        if (failure_reason_.empty()) failure_reason_ = "Docking connection unavailable";
-        message_ = "Docking connection unavailable; stop unconfirmed; operator intervention required; " +
-             failureContext(now);
+        if (failure_reason_.empty())
+          failure_reason_ = "Docking connection unavailable";
+        message_ =
+            "Docking connection unavailable; stop unconfirmed; operator intervention required; " + failureContext(now);
       }
       return;
     }
     if (query_pending_ && now - queried_ >= std::chrono::seconds(1))
     {
       query_pending_ = false;
-      if (reserved_ && submitted_ && !terminal_) ++operation_query_timeouts_;
+      if (reserved_ && submitted_ && !terminal_)
+        ++operation_query_timeouts_;
       update(Feedback::Unknown);
     }
     if (!query_pending_ && now - queried_ >= std::chrono::milliseconds(100))
     {
       queried_ = now;
       query_pending_ = client_->requestOnce("dockInfo", nullptr, true);
-      if (!query_pending_) fail();
+      if (!query_pending_)
+        fail();
     }
     if (request_pending_)
     {
@@ -239,7 +295,8 @@ public:
           stop_requested_ = true;
           failure_reason_ = "Undock submission failed; outcome uncertain";
         }
-        else submitted_ = true;
+        else
+          submitted_ = true;
       }
     }
     if (reserved_ && submitted_ && !terminal_ && !stop_requested_)
@@ -253,13 +310,12 @@ public:
         const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - operation_started_).count();
         const auto info_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - info_received_).count();
         const auto query_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - queried_).count();
-        failure_reason_ = "Docking feedback stale during undocking; elapsed_ms=" +
-                          std::to_string(elapsed_ms) + "; last_info_age_ms=" +
-                          (have_info_ ? std::to_string(info_age_ms) : "unknown") +
+        failure_reason_ = "Docking feedback stale during undocking; elapsed_ms=" + std::to_string(elapsed_ms) +
+                          "; last_info_age_ms=" + (have_info_ ? std::to_string(info_age_ms) : "unknown") +
                           "; last_reply_after_latest_query_ms=" + std::to_string(last_reply_after_latest_query_ms_) +
                           "; query_pending=" + (query_pending_ ? "true" : "false") +
-                          "; query_age_ms=" + std::to_string(query_age_ms) + "; query_timeouts=" +
-                          std::to_string(operation_query_timeouts_);
+                          "; query_age_ms=" + std::to_string(query_age_ms) +
+                          "; query_timeouts=" + std::to_string(operation_query_timeouts_);
       }
       else if (now - telemetry_received_ >= std::chrono::milliseconds(200))
         failure_reason_ = "Velocity telemetry stale during undocking";
@@ -287,7 +343,8 @@ public:
       {
         terminal_ = true;
         message_ = stopped_ ? "Departure interrupted; stationary feedback observed; control remains inhibited" :
-                             "Stop requested but not confirmed; use operator protective controls; control remains inhibited";
+                              "Stop requested but not confirmed; use operator protective controls; control remains "
+                              "inhibited";
         message_ += "; " + failureContext(now);
       }
     }
@@ -383,15 +440,15 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     refresh(Clock::now());
     operation(Readiness{ state_, generation_, departureTelemetryFresh(Clock::now()), departure_stationary_,
-               unverified_start_allowed_ });
+                         unverified_start_allowed_ });
   }
 
 private:
   bool faultAcknowledgementEligibleLocked(TimePoint now)
   {
-    return supported_ && !reserved_ && !shutdown_reserved_ && contact_confirmed_ && infoFresh(now) &&
-           !info_.forced && info_.shutdown_countdown == 0 && info_.state == DockInfo::State::Docked &&
-           stationary(now) && readiness(now).state == State::Docked;
+    return supported_ && !reserved_ && !shutdown_reserved_ && contact_confirmed_ && infoFresh(now) && !info_.forced &&
+           info_.shutdown_countdown == 0 && info_.state == DockInfo::State::Docked && stationary(now) &&
+           readiness(now).state == State::Docked;
   }
 
   bool departureTelemetryFresh(TimePoint now) const
@@ -403,8 +460,8 @@ private:
   std::string failureContext(TimePoint now) const
   {
     return failure_reason_ + "; last dockInfo state=" +
-           (have_info_ ? std::to_string(static_cast<unsigned int>(info_.state)) : "unknown") +
-           " (" + (infoFresh(now) ? "fresh" : "stale or unavailable") + ")";
+           (have_info_ ? std::to_string(static_cast<unsigned int>(info_.state)) : "unknown") + " (" +
+           (infoFresh(now) ? "fresh" : "stale or unavailable") + ")";
   }
 
   bool infoFresh(TimePoint now) const
@@ -422,7 +479,8 @@ private:
   {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     const auto now = Clock::now();
-    if (!query_pending_) return;
+    if (!query_pending_)
+      return;
     query_pending_ = false;
     if (now - queried_ >= std::chrono::seconds(1) || !readDockInfo(packet, info_))
     {
@@ -442,8 +500,9 @@ private:
       update(Feedback::Unknown);
     }
     else if (info_.state == DockInfo::State::Undocked && contact_confirmed_ &&
-         (readiness(now).state == State::Ready ||
-          (stationary(now) && (!submitted_ || (now > operation_started_ && stationary_since_ >= operation_started_)))))
+             (readiness(now).state == State::Ready ||
+              (stationary(now) &&
+               (!submitted_ || (now > operation_started_ && stationary_since_ >= operation_started_)))))
     {
       update(Feedback::Undocked);
     }
@@ -452,7 +511,8 @@ private:
     {
       update(Feedback::Docked);
     }
-    else update(Feedback::Unknown);
+    else
+      update(Feedback::Unknown);
   }
 
   void transition(State next)
@@ -479,8 +539,7 @@ private:
     {
       return;
     }
-    if (state_ == State::Undocking &&
-        std::chrono::duration<double>(now - started_).count() >= undock_timeout_sec_)
+    if (state_ == State::Undocking && std::chrono::duration<double>(now - started_).count() >= undock_timeout_sec_)
     {
       transition(State::Failed);
     }
@@ -509,7 +568,8 @@ private:
   ArFunctor1C<DockingInterface, ArNetPacket*> info_callback_;
   std::mutex operation_mutex_;
   DockInfo info_;
-  TimePoint queried_{}, info_received_{}, telemetry_received_{}, stationary_since_{}, operation_started_{}, stop_started_{};
+  TimePoint queried_{}, info_received_{}, telemetry_received_{}, stationary_since_{}, operation_started_{},
+      stop_started_{};
   std::chrono::milliseconds::rep last_reply_after_latest_query_ms_{ 0 };
   unsigned int operation_query_timeouts_{ 0 };
   bool supported_{ false }, mode_ready_{ false }, contact_confirmed_{ false }, query_pending_{ false };
@@ -519,4 +579,4 @@ private:
   std::string message_;
   std::string failure_reason_;
 };
-}
+}  // namespace amr_core

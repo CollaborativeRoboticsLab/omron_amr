@@ -18,6 +18,17 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>amr_core</test_depend>
+  <test_depend>amr_msgs</test_depend>
+  <test_depend>libaria</test_depend>
+  <test_depend>nav2_msgs</test_depend>
+  <test_depend>nlohmann_json</test_depend>
+  <test_depend>rclcpp</test_depend>
+  <test_depend>rclcpp_action</test_depend>
+  <test_depend>std_msgs</test_depend>
+  <test_depend>std_srvs</test_depend>
+  <test_depend>tf2_ros</test_depend>
   <test_depend>python3-yaml</test_depend>
   <test_depend>geometry_msgs</test_depend>
   <test_depend>lifecycle_msgs</test_depend>

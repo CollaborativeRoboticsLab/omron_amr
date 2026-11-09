@@ -56,7 +56,7 @@ TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRequiresAdvertisedComman
 {
   node_->declare_parameter<bool>("fault.ros_service.enabled", true);
   node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   driver_ = std::make_unique<DriverInterface>(node_);
   EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
                std::runtime_error);
@@ -68,7 +68,7 @@ TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementSendsOnlyNamedFault)
   node_->declare_parameter<bool>("fault.ros_service.enabled", true);
   node_->declare_parameter<std::string>("fault.ros_service.name", "custom_acknowledge_fault");
   node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("custom_acknowledge_fault");
   ASSERT_TRUE(service->wait_for_service(1s));
@@ -100,7 +100,7 @@ TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRejectsStaleTelemetry)
   enableFaultAcknowledgementBackend();
   node_->declare_parameter<bool>("fault.ros_service.enabled", true);
   node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -123,7 +123,7 @@ TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRejectsMovingOrReservedU
   enableFaultAcknowledgementBackend();
   node_->declare_parameter<bool>("fault.ros_service.enabled", true);
   node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
   ASSERT_TRUE(service->wait_for_service(1s));
@@ -158,7 +158,7 @@ TEST_F(DriverInterfaceLoopbackTest, FaultAcknowledgementRejectsReservedShutdown)
   node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
   node_->declare_parameter<bool>("shutdown.enabled", true);
   node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
   auto service = node_->create_client<amr_msgs::srv::AcknowledgeFault>("acknowledge_fault");
@@ -195,7 +195,7 @@ TEST_F(DriverInterfaceLoopbackTest, ShutdownRequiresAdvertisedServerCommand)
 {
   node_->declare_parameter<bool>("shutdown.enabled", true);
   node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   driver_ = std::make_unique<DriverInterface>(node_);
   EXPECT_THROW(driver_->initialize("127.0.0.1", static_cast<int>(server_.getTcpPort()), "", "", ""),
                std::runtime_error);
@@ -206,7 +206,7 @@ TEST_F(DriverInterfaceLoopbackTest, ShutdownIsOneShotAndBlocksUndocking)
   enableShutdownBackend();
   node_->declare_parameter<bool>("shutdown.enabled", true);
   node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   auto shutdown = node_->create_client<std_srvs::srv::Trigger>("shutdown_robot");
   ASSERT_TRUE(shutdown->wait_for_service(1s));
@@ -238,7 +238,7 @@ TEST_F(DriverInterfaceLoopbackTest, ShutdownRejectsMovingTelemetry)
   enableShutdownBackend();
   node_->declare_parameter<bool>("shutdown.enabled", true);
   node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -259,7 +259,7 @@ TEST_F(DriverInterfaceLoopbackTest, ShutdownRejectsStaleTelemetry)
   enableShutdownBackend();
   node_->declare_parameter<bool>("shutdown.enabled", true);
   node_->declare_parameter<bool>("shutdown.exclusive_control_confirmed", true);
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   initializeDockingBackend();
   {
     std::lock_guard<std::mutex> lock(mutex_);

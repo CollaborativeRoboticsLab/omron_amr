@@ -44,7 +44,8 @@ hardware gates.
 ### Next Steps Toward Nav2 Movement
 
 1. Investigate docking feedback timing. A localhost test now reproduces a reply
-	gap followed by fresh Undocked feedback, and stale-feedback results record
+	gap followed by fresh Undocked feedback and confirms a poll reaches the fake
+	server during the gap. Stale-feedback results record
 	poll timing at failure. The real gap remains unexplained. Keep stale-feedback
 	inhibition in place; resolve the action result before relying on automated
 	undocking.

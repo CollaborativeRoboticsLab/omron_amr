@@ -79,7 +79,6 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(tf2_msgs REQUIRED)
-  find_package(nav2_velocity_smoother REQUIRED)
   ament_add_gtest(test_robot_interface
     test/test_config_interface.cpp
     test/test_debug_interface.cpp
@@ -91,7 +90,7 @@ if(BUILD_TESTING)
     test/test_map_interface.cpp
   )
   ament_target_dependencies(test_robot_interface
-    rclcpp rclcpp_action amr_msgs nav2_msgs tf2_ros tf2_msgs std_msgs std_srvs nav_msgs geometry_msgs nav2_velocity_smoother
+    rclcpp amr_msgs tf2_ros tf2_msgs std_msgs std_srvs nav_msgs geometry_msgs
   )
   target_link_libraries(test_robot_interface libaria::ArNetworking nlohmann_json::nlohmann_json)
   target_compile_definitions(test_robot_interface PRIVATE AMR_CORE_EXECUTABLE="$<TARGET_FILE:amr_core>")

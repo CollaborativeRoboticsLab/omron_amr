@@ -7,7 +7,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    rviz = LaunchConfiguration('rviz')
+    use_rviz = LaunchConfiguration('use_rviz')
     use_nav2 = LaunchConfiguration('use_nav2')
     use_slam = LaunchConfiguration('use_slam')
     extra_params_file = LaunchConfiguration('extra_params_file')
@@ -20,9 +20,9 @@ def generate_launch_description():
         description='Robot namespace shared by hardware and Nav2.',
     )
 
-    declare_rviz = DeclareLaunchArgument(
-        'rviz',
-        default_value='false',
+    declare_use_rviz = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
         description='Launch RViz with the LD250 configuration.',
     )
 
@@ -80,7 +80,7 @@ def generate_launch_description():
                 'ld250_rviz.launch.py',
             ])
         ),
-        condition=IfCondition(rviz),
+        condition=IfCondition(use_rviz),
         launch_arguments={'namespace': namespace}.items(),
     )
 
@@ -102,7 +102,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         declare_namespace,
-        declare_rviz,
+        declare_use_rviz,
         declare_use_nav2,
         declare_use_slam,
         declare_robot_description_override,

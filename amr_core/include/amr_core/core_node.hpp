@@ -138,13 +138,17 @@ private:
     undock_server_ = rclcpp_action::create_server<Undock>(shared_from_this(), "undock_robot",
       [this](const rclcpp_action::GoalUUID&, std::shared_ptr<const Undock::Goal> goal) {
         std::lock_guard<std::mutex> lock(undock_mutex_);
-        if (undock_goal_ || (!goal->dock_type.empty() && goal->dock_type != dock_type_) ||
-          !std::isfinite(goal->max_undocking_time) || goal->max_undocking_time <= 0.0f ||
-          !docking_->reserveUndock(get_parameter("docking.contact_dock_confirmed").as_bool(),
-                      get_parameter("docking.exclusive_control_confirmed").as_bool(),
-                      goal->max_undocking_time))
-          return rclcpp_action::GoalResponse::REJECT;
-        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+        const char* reason = nullptr;
+        if (undock_goal_)
+          reason = "another undocking goal is active";
+        else if (!goal->dock_type.empty() && goal->dock_type != dock_type_)
+          reason = "dock_type does not match the configured dock type";
+        else if (docking_->reserveUndock(get_parameter("driver.docking.contact_dock_confirmed").as_bool(),
+                                         get_parameter("docking.exclusive_control_confirmed").as_bool(),
+                                         goal->max_undocking_time, &reason))
+          return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+        RCLCPP_WARN(get_logger(), "Undock goal rejected: %s", reason ? reason : "reservation failed");
+        return rclcpp_action::GoalResponse::REJECT;
       },
       [this](std::shared_ptr<UndockGoal> goal) {
         std::lock_guard<std::mutex> lock(undock_mutex_);

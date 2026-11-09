@@ -2,7 +2,6 @@
 
 #include <gtest/gtest.h>
 #include <tf2_msgs/msg/tf_message.hpp>
-#include <nav2_velocity_smoother/velocity_smoother.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -16,10 +15,8 @@
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <nav2_msgs/action/undock_robot.hpp>
 #include <rclcpp/parameter_client.hpp>
 #include <limits>
-#include <rclcpp_action/rclcpp_action.hpp>
 
 #include "amr_core/interfaces/drive_interface.hpp"
 #include "amr_core/interfaces/configuration_interface.hpp"
@@ -149,7 +146,10 @@ protected:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (suppress_docking_replies_)
+    {
+      ++suppressed_docking_queries_;
       return;
+    }
     ArNetPacket packet;
     packet.uByteToBuf(fake_docking_state_);
     packet.uByteToBuf(fake_docking_forced_);
@@ -216,7 +216,7 @@ protected:
     enableFaultAcknowledgementBackend();
     ASSERT_TRUE(server_.addData("getFaults", "query faults", &faults_callback_, "none", "faults"));
     node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
-    node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+    node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
     node_->declare_parameter<bool>("fault.monitor.auto_acknowledge_enabled", true);
     node_->declare_parameter<std::vector<std::string>>("fault.auto_acknowledge_fault_list", { "IrregularShutdown" });
   }
@@ -320,19 +320,6 @@ protected:
       }
       core_process_ = -1;
     }
-    if (smoother_)
-    {
-      if (smoother_->get_current_state().label() == "active")
-      {
-        smoother_->deactivate();
-      }
-      if (smoother_->get_current_state().label() == "inactive")
-      {
-        smoother_->cleanup();
-      }
-      executor_.remove_node(smoother_->get_node_base_interface());
-      smoother_.reset();
-    }
     driver_.reset();
     if (executor_added_)
     {
@@ -423,36 +410,6 @@ protected:
                                      std::fabs(record.rotation - expected_rotation) < 1e-3;
                             }),
               3);
-  }
-
-  void initializeSmootherChain()
-  {
-    node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 0.2);
-    node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 0.2));
-    initializeDriver();
-    rclcpp::NodeOptions options;
-    options.arguments({ "--ros-args", "-r", "__ns:=/drive_chain_test", "-r", "cmd_vel:=/drive_chain_test/cmd_vel_nav",
-                        "-r", "cmd_vel_smoothed:=/drive_test/cmd_vel" });
-    options.parameter_overrides({ { "use_sim_time", false },
-                                  { "enable_stamped_cmd_vel", false },
-                                  { "feedback", "OPEN_LOOP" },
-                                  { "smoothing_frequency", 20.0 },
-                                  { "velocity_timeout", 1.0 },
-                                  { "max_velocity", std::vector<double>{ 1.0, 0.0, 1.0 } },
-                                  { "min_velocity", std::vector<double>{ -0.1, 0.0, -1.0 } },
-                                  { "max_accel", std::vector<double>{ 2.5, 0.0, 3.2 } },
-                                  { "max_decel", std::vector<double>{ -2.5, 0.0, -3.2 } } });
-    smoother_ = std::make_shared<nav2_velocity_smoother::VelocitySmoother>(options);
-    executor_.add_node(smoother_->get_node_base_interface());
-    ASSERT_EQ(smoother_->configure().label(), "inactive");
-    ASSERT_EQ(smoother_->activate().label(), "active");
-    upstream_ = node_->create_publisher<geometry_msgs::msg::Twist>("/drive_chain_test/cmd_vel_nav", 1);
-    ASSERT_TRUE(waitWithExecutor([this]() {
-      geometry_msgs::msg::Twist command;
-      command.linear.x = 0.6;
-      upstream_->publish(command);
-      return receivedDrive(60.0, 0.0);
-    }));
   }
 
   void recordDrive(ArServerClient*, ArNetPacket* packet)
@@ -622,6 +579,7 @@ protected:
   unsigned short fake_docking_shutdown_countdown_{ 0 };
   bool suppress_docking_replies_{ false };
   bool suppress_docking_after_undock_{ false };
+  int suppressed_docking_queries_{ 0 };
   bool server_started_{ false };
   pid_t core_process_{ -1 };
   bool executor_added_{ false };
@@ -634,8 +592,6 @@ protected:
   int fault_queries_{ 0 };
   bool fault_trailing_bytes_{ false };
   std::unique_ptr<DriverInterface> driver_;
-  std::shared_ptr<nav2_velocity_smoother::VelocitySmoother> smoother_;
-  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr upstream_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
   rclcpp::executors::SingleThreadedExecutor executor_;
   std::mutex mutex_;

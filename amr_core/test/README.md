@@ -8,16 +8,18 @@ do not authorize new robot access or movement.
 
 The core suite tests command expiry, stop priority, ratio mapping, transport,
 docking, configuration and calibration workflows. Localhost tests exercise the
-driver and docking action against a fake server, including all six primitive
+driver and docking interface against a fake server, including all six primitive
 streams. Python tests cover captured data and pulse-runner guards. All four
 registered core test groups passed on 2026-10-30 after the loopback tests were
 split by interface. The aggregate target was then renamed to
-`test_robot_interface`, rebuilt and passed separately. The test executable
-contains 115 cases, including 67 loopback cases. Offline tests do not establish
+`test_robot_interface`, rebuilt and passed separately. At that time the test executable
+contained 115 cases, including 67 loopback cases; the current layout differs.
+Offline tests do not establish
 physical motion, firmware behavior or safety performance.
 
 A loopback test withholds docking replies after undocking, then resumes them;
-the driver requests stop and retains the failure after fresh Undocked feedback.
+it verifies at least one poll reaches the fake server during the gap, the driver
+requests stop, and the failure remains latched after fresh Undocked feedback.
 Stale-feedback failure messages include poll timing captured at failure. The
 timing is relative to the most recently queued query and does not identify which
 request produced a reply. This does not explain the observed robot feedback gap.
@@ -25,12 +27,18 @@ request produced a reply. This does not explain the observed robot feedback gap.
 The aggregate target includes drive, configuration, map, debug and docking
 tests. Loopback cases share [robot_interface_test_fixture.hpp](robot_interface_test_fixture.hpp);
 the drive-specific cases remain in [test_drive_interface.cpp](test_drive_interface.cpp).
+The Nav2 smoother and undock action contract tests now live in
+[test_nav2_integration.cpp](../../amr_nav2/test/test_nav2_integration.cpp) and
+use the core localhost fixture and installed core executable. The supervised
+[undocking test](../../amr_nav2/test/test_undocking.py) also lives in `amr_nav2`;
+its explicit robot and movement approvals remain mandatory.
 
 Run the registered offline tests from the workspace root:
 
 ```bash
 source install/setup.bash
 ctest --test-dir build/amr_core --output-on-failure
+ctest --test-dir build/amr_nav2 --output-on-failure -R '^test_nav2_integration$'
 ```
 
 To rebuild and run the aggregate GoogleTest target:

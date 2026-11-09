@@ -239,108 +239,12 @@ TEST(DockingInterface, ExceptionsAndInvalidTimeoutsAreRejected)
   EXPECT_THROW(Docking({}, 0.0), std::invalid_argument);
 }
 
-TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnforcesDeadline)
-{
-  using Action = nav2_msgs::action::UndockRobot;
-  driver_.reset();
-  ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
-  ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    telemetry_.forward_mm_s = 0;
-  }
-  const auto port_argument = std::string("robot.port:=") + std::to_string(server_.getTcpPort());
-  core_process_ = fork();
-  ASSERT_GE(core_process_, 0);
-  if (core_process_ == 0)
-  {
-    execl(AMR_CORE_EXECUTABLE, AMR_CORE_EXECUTABLE, "--ros-args", "-r", "__ns:=/dock_action_test", "-p",
-          "robot.ip:=127.0.0.1", "-p", port_argument.c_str(), "-p", "robot.user:=loopback", "-p", "robot.protocol:=''",
-          "-p", "status.publish:=false", "-p", "laser.main_laser.enabled:=false", "-p",
-          "driver.tf.enabled:=false", "-p", "driver.cmd_vel.topic:=/drive_test/cmd_vel",
-          static_cast<char*>(nullptr));
-    _exit(127);
-  }
-  auto client = rclcpp_action::create_client<Action>(node_, "/dock_action_test/undock_robot");
-  ASSERT_TRUE(waitWithExecutor([&client]() { return client->action_server_is_ready(); }));
-  const auto started = std::chrono::steady_clock::now();
-  ASSERT_TRUE(waitWithExecutor([started]() { return std::chrono::steady_clock::now() - started > 700ms; }));
-  Action::Goal goal;
-  auto rejected = client->async_send_goal(goal);
-  ASSERT_TRUE(waitWithExecutor([&rejected]() { return rejected.wait_for(0ms) == std::future_status::ready; }));
-  EXPECT_FALSE(rejected.get());
-  auto parameters = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/dock_action_test/core_node");
-  ASSERT_TRUE(waitWithExecutor([&parameters]() { return parameters->service_is_ready(); }));
-  auto confirmed = parameters->set_parameters({ rclcpp::Parameter("docking.contact_dock_confirmed", true),
-                                                rclcpp::Parameter("docking.exclusive_control_confirmed", true) });
-  ASSERT_TRUE(waitWithExecutor([&confirmed]() { return confirmed.wait_for(0ms) == std::future_status::ready; }));
-  for (const auto& result : confirmed.get())
-    ASSERT_TRUE(result.successful);
-  goal.dock_type = "unsupported";
-  auto invalid_type = client->async_send_goal(goal);
-  ASSERT_TRUE(waitWithExecutor([&invalid_type]() { return invalid_type.wait_for(0ms) == std::future_status::ready; }));
-  EXPECT_FALSE(invalid_type.get());
-  goal.dock_type = "omron";
-  for (const auto timeout :
-       { 0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity() })
-  {
-    goal.max_undocking_time = timeout;
-    auto invalid_time = client->async_send_goal(goal);
-    ASSERT_TRUE(
-        waitWithExecutor([&invalid_time]() { return invalid_time.wait_for(0ms) == std::future_status::ready; }));
-    EXPECT_FALSE(invalid_time.get());
-  }
-  goal.max_undocking_time = 10.0f;
-  int feedback_count = 0;
-  rclcpp_action::Client<Action>::SendGoalOptions options;
-  options.feedback_callback = [&feedback_count](auto, auto) { ++feedback_count; };
-  auto accepted = client->async_send_goal(goal, options);
-  ASSERT_TRUE(waitWithExecutor([&accepted]() { return accepted.wait_for(0ms) == std::future_status::ready; }));
-  auto handle = accepted.get();
-  ASSERT_TRUE(handle);
-  auto result = client->async_get_result(handle);
-  ASSERT_TRUE(waitWithExecutor([&result]() { return result.wait_for(0ms) == std::future_status::ready; }));
-  EXPECT_EQ(result.get().code, rclcpp_action::ResultCode::SUCCEEDED);
-  EXPECT_TRUE(result.get().result->success);
-  EXPECT_EQ(result.get().result->error_code, Action::Result::NONE);
-  EXPECT_TRUE(result.get().result->error_msg.empty());
-  EXPECT_GT(feedback_count, 0);
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    EXPECT_EQ(undock_requests_, 1);
-    EXPECT_TRUE(records_.empty());
-    fake_docking_state_ = 2;
-  }
-  const auto redocked = std::chrono::steady_clock::now();
-  ASSERT_TRUE(waitWithExecutor([redocked]() { return std::chrono::steady_clock::now() - redocked > 250ms; }));
-  goal.dock_type.clear();
-  goal.max_undocking_time = 0.1f;
-  auto short_goal = client->async_send_goal(goal);
-  ASSERT_TRUE(waitWithExecutor([&short_goal]() { return short_goal.wait_for(0ms) == std::future_status::ready; }));
-  auto short_handle = short_goal.get();
-  ASSERT_TRUE(short_handle);
-  auto timed_out = client->async_get_result(short_handle);
-  ASSERT_TRUE(waitWithExecutor([&timed_out]() { return timed_out.wait_for(0ms) == std::future_status::ready; }));
-  EXPECT_EQ(timed_out.get().code, rclcpp_action::ResultCode::ABORTED);
-  EXPECT_FALSE(timed_out.get().result->success);
-  EXPECT_EQ(timed_out.get().result->error_code, Action::Result::FAILED_TO_CONTROL);
-  EXPECT_NE(timed_out.get().result->error_msg.find("Undocking deadline exceeded"), std::string::npos);
-  EXPECT_NE(timed_out.get().result->error_msg.find("last dockInfo state="), std::string::npos);
-  EXPECT_NE(timed_out.get().result->error_msg.find("control remains inhibited"), std::string::npos);
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    EXPECT_EQ(undock_requests_, 2);
-    ASSERT_FALSE(records_.empty());
-    EXPECT_TRUE(std::all_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; }));
-  }
-}
-
 TEST_F(DriverInterfaceLoopbackTest, UndockedReadinessRemainsFreshDuringNormalMotion)
 {
   using Docking = amr_core::DockingInterface;
   ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
   ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     fake_docking_state_ = 0;
@@ -380,11 +284,19 @@ TEST_F(DriverInterfaceLoopbackTest, UndockedReadinessRemainsFreshDuringNormalMot
 
 TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReservationAndSettledDeparture)
 {
+  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
   initializeDockingBackend();
-  EXPECT_FALSE(docking_->reserveUndock(false, true));
-  EXPECT_FALSE(docking_->reserveUndock(true, false));
-  ASSERT_TRUE(docking_->reserveUndock(true, true));
-  EXPECT_FALSE(docking_->reserveUndock(true, true));
+  const char* reason = nullptr;
+  EXPECT_FALSE(docking_->reserveUndock(false, false, 30.0, &reason));
+  EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed and docking.exclusive_control_confirmed are false");
+  EXPECT_FALSE(docking_->reserveUndock(false, true, 30.0, &reason));
+  EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed is false");
+  EXPECT_FALSE(docking_->reserveUndock(true, false, 30.0, &reason));
+  EXPECT_STREQ(reason, "docking.exclusive_control_confirmed is false");
+  ASSERT_TRUE(docking_->reserveUndock(true, true, 30.0, &reason));
+  EXPECT_EQ(reason, nullptr);
+  EXPECT_FALSE(docking_->reserveUndock(true, true, 30.0, &reason));
+  EXPECT_STREQ(reason, "another undocking operation is reserved");
   docking_->beginUndock();
   ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
   EXPECT_TRUE(docking_->operationStatus().success);
@@ -414,6 +326,7 @@ TEST_F(DriverInterfaceLoopbackTest, DockingFeedbackGapLatchesFailureAfterFreshUn
   {
     std::lock_guard<std::mutex> lock(mutex_);
     EXPECT_EQ(undock_requests_, 1);
+    EXPECT_GE(suppressed_docking_queries_, 1);
     suppress_docking_replies_ = false;
   }
   ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
@@ -483,7 +396,7 @@ TEST_F(DriverInterfaceLoopbackTest, MissingDockingBackendDefaultsToVelocityInhib
 
 TEST_F(DriverInterfaceLoopbackTest, DockedVelocityRemainsInhibitedWithContactAndExclusiveConfirmations)
 {
-  node_->declare_parameter<bool>("docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
   node_->declare_parameter<bool>("docking.exclusive_control_confirmed", true);
   initializeDockingBackend();
   publish(0.2, 0.0);

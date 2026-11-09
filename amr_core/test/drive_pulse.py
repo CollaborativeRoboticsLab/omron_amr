@@ -157,7 +157,7 @@ def main():
             '-r', '__node:=amr_core', '-r', 'undock_robot:=/drive_acceptance/undock_robot',
             '-p', 'status.publish:=false', '-p', 'laser.main_laser.enabled:=false',
             '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.tf.enabled:=false',
-            '-p', 'docking.contact_dock_confirmed:=true',
+            '-p', 'driver.docking.contact_dock_confirmed:=true',
             '-p', 'driver.cmd_vel.topic:=/drive_acceptance/cmd_vel',
             '-p', 'driver.stop.topic:=/drive_acceptance/stop', '-p', 'driver.odom.topic:=/drive_acceptance/odom',
             '-p', 'driver.drive.ready_topic:=/drive_acceptance/drive_ready']
