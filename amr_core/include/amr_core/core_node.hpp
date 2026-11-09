@@ -134,7 +134,7 @@ private:
     docking_ = driver_->dockingInterface();
     dock_type_ = getOrDeclareParameter<std::string>("docking.dock_type", "omron");
     if (dock_type_.empty()) throw std::invalid_argument("docking.dock_type must not be empty");
-    getOrDeclareParameter<bool>("docking.exclusive_control_confirmed", false);
+    getOrDeclareParameter<bool>("driver.drive.exclusive_control_confirmed", false);
     undock_server_ = rclcpp_action::create_server<Undock>(shared_from_this(), "undock_robot",
       [this](const rclcpp_action::GoalUUID&, std::shared_ptr<const Undock::Goal> goal) {
         std::lock_guard<std::mutex> lock(undock_mutex_);
@@ -144,7 +144,7 @@ private:
         else if (!goal->dock_type.empty() && goal->dock_type != dock_type_)
           reason = "dock_type does not match the configured dock type";
         else if (docking_->reserveUndock(get_parameter("driver.docking.contact_dock_confirmed").as_bool(),
-                                         get_parameter("docking.exclusive_control_confirmed").as_bool(),
+                                         get_parameter("driver.drive.exclusive_control_confirmed").as_bool(),
                                          goal->max_undocking_time, &reason))
           return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
         RCLCPP_WARN(get_logger(), "Undock goal rejected: %s", reason ? reason : "reservation failed");

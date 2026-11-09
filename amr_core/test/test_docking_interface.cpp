@@ -288,11 +288,11 @@ TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReser
   initializeDockingBackend();
   const char* reason = nullptr;
   EXPECT_FALSE(docking_->reserveUndock(false, false, 30.0, &reason));
-  EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed and docking.exclusive_control_confirmed are false");
+  EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed and driver.drive.exclusive_control_confirmed are false");
   EXPECT_FALSE(docking_->reserveUndock(false, true, 30.0, &reason));
   EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed is false");
   EXPECT_FALSE(docking_->reserveUndock(true, false, 30.0, &reason));
-  EXPECT_STREQ(reason, "docking.exclusive_control_confirmed is false");
+  EXPECT_STREQ(reason, "driver.drive.exclusive_control_confirmed is false");
   ASSERT_TRUE(docking_->reserveUndock(true, true, 30.0, &reason));
   EXPECT_EQ(reason, nullptr);
   EXPECT_FALSE(docking_->reserveUndock(true, true, 30.0, &reason));
@@ -397,7 +397,7 @@ TEST_F(DriverInterfaceLoopbackTest, MissingDockingBackendDefaultsToVelocityInhib
 TEST_F(DriverInterfaceLoopbackTest, DockedVelocityRemainsInhibitedWithContactAndExclusiveConfirmations)
 {
   node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
-  node_->declare_parameter<bool>("docking.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("driver.drive.exclusive_control_confirmed", true);
   initializeDockingBackend();
   publish(0.2, 0.0);
   const auto blocked = std::chrono::steady_clock::now();

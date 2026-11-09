@@ -23,6 +23,7 @@ if(BUILD_TESTING)
   find_package(nav2_velocity_smoother REQUIRED)
   find_package(nav_msgs REQUIRED)
   find_package(nlohmann_json REQUIRED)
+  find_package(rcl_interfaces REQUIRED)
   find_package(rclcpp REQUIRED)
   find_package(rclcpp_action REQUIRED)
   find_package(sensor_msgs REQUIRED)
@@ -36,7 +37,7 @@ if(BUILD_TESTING)
   target_include_directories(test_nav2_integration PRIVATE ../amr_core/include ../amr_core/test)
   target_compile_definitions(test_nav2_integration PRIVATE AMR_CORE_EXECUTABLE="${AMR_CORE_EXECUTABLE}")
   ament_target_dependencies(test_nav2_integration
-    amr_msgs geometry_msgs nav2_msgs nav2_velocity_smoother nav_msgs rclcpp rclcpp_action
+    amr_msgs geometry_msgs nav2_msgs nav2_velocity_smoother nav_msgs rcl_interfaces rclcpp rclcpp_action
     sensor_msgs std_msgs std_srvs tf2_msgs tf2_ros)
   target_link_libraries(test_nav2_integration libaria::ArNetworking nlohmann_json::nlohmann_json)
   ament_add_pytest_test(test_navigation_contract test/test_navigation_contract.py)

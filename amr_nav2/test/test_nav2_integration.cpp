@@ -42,13 +42,13 @@ TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnfor
   ASSERT_TRUE(waitWithExecutor([&warnings]() {
     return std::any_of(warnings.begin(), warnings.end(), [](const std::string& message) {
       return message.find("Undock goal rejected: driver.docking.contact_dock_confirmed and "
-                          "docking.exclusive_control_confirmed are false") != std::string::npos;
+                          "driver.drive.exclusive_control_confirmed are false") != std::string::npos;
     });
   }));
   auto parameters = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/dock_action_test/core_node");
   ASSERT_TRUE(waitWithExecutor([&parameters]() { return parameters->service_is_ready(); }));
   auto confirmed = parameters->set_parameters({ rclcpp::Parameter("driver.docking.contact_dock_confirmed", true),
-                                                rclcpp::Parameter("docking.exclusive_control_confirmed", true) });
+                                                rclcpp::Parameter("driver.drive.exclusive_control_confirmed", true) });
   ASSERT_TRUE(waitWithExecutor([&confirmed]() { return confirmed.wait_for(0ms) == std::future_status::ready; }));
   for (const auto& result : confirmed.get())
     ASSERT_TRUE(result.successful);

@@ -85,6 +85,7 @@ amr_core:
         translation_dead_zone_pct: -1.0
         rotation_dead_zone_pct: -1.0
         feedback_timeout_sec: 0.2
-      docking:
+      undocking:
         start_from_dock: false
+        exclusive_control_confirmed: true
         contact_dock_confirmed: false
