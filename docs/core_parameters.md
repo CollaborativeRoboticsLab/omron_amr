@@ -44,6 +44,7 @@ The published `angle_increment` is derived from the configured angular span and 
 - `driver.tf.base_frame`: base frame name
 - `driver.drive.send_frequency`: maximum normal drive packet generation rate in Hz
 - `driver.undocking.start_from_dock`: startup-only, default `true`. When `false`, missing docking feedback may permit motion and `/amr/drive_ready` may be true; physically verify that the robot is clear of the dock and cable. This is not a sensor check or a safety-rated protection. Observed docking, forced state, or shutdown feedback revokes the exception until restart. See [parameters.md](parameters.md) for the full policy.
+- `driver.undocking.feedback_timeout_sec`: startup-only docking feedback age limit during active undocking, default `1.0` seconds; the LD250 configuration sets `5.0`. Larger values delay detection of lost feedback. See [parameters.md](parameters.md).
 - `driver.cmd_vel.min_linear`: minimum linear speed in mm/s
 - `driver.cmd_vel.max_linear`: maximum linear speed in mm/s
 - `driver.cmd_vel.min_angular`: minimum angular speed in deg/s

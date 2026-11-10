@@ -37,15 +37,18 @@ public:
   using UndockRequest = std::function<bool()>;
 
   explicit DockingInterface(UndockRequest request = {}, double feedback_timeout_sec = 1.0,
-                            double undock_timeout_sec = 30.0, bool start_from_dock = true)
+                            double undock_timeout_sec = 30.0, bool start_from_dock = true,
+                            double undocking_feedback_timeout_sec = 1.0)
     : request_(std::move(request))
     , feedback_timeout_sec_(feedback_timeout_sec)
     , undock_timeout_sec_(undock_timeout_sec)
+    , undocking_feedback_timeout_sec_(undocking_feedback_timeout_sec)
     , unverified_start_allowed_(!start_from_dock)
     , info_callback_(this, &DockingInterface::handleInfo)
   {
     if (!std::isfinite(feedback_timeout_sec_) || feedback_timeout_sec_ <= 0.0 || !std::isfinite(undock_timeout_sec_) ||
-        undock_timeout_sec_ <= 0.0)
+        undock_timeout_sec_ <= 0.0 || !std::isfinite(undocking_feedback_timeout_sec_) ||
+        undocking_feedback_timeout_sec_ <= 0.0)
     {
       throw std::invalid_argument("Docking timeouts must be positive and finite");
     }
@@ -117,7 +120,8 @@ public:
       reason = "velocity telemetry is stale or the robot is not stationary";
     else if (readiness().state == State::Failed)
       reason = "docking readiness is failed and control remains inhibited";
-    if (rejection_reason) *rejection_reason = reason;
+    if (rejection_reason)
+      *rejection_reason = reason;
     if (reason)
     {
       return false;
@@ -126,6 +130,7 @@ public:
     message_.clear();
     failure_reason_.clear();
     operation_query_timeouts_ = 0;
+    max_info_gap_ms_ = 0;
     operation_timeout_sec_ = std::min(max_undocking_time, undock_timeout_sec_);
     reserved_ = true;
     return true;
@@ -244,6 +249,9 @@ public:
     std::lock_guard<std::mutex> lock(operation_mutex_);
     const auto now = Clock::now();
     mode_ready_ = mode_ready;
+    if (reserved_ && have_info_)
+      max_info_gap_ms_ = std::max(max_info_gap_ms_,
+                                  std::chrono::duration_cast<std::chrono::milliseconds>(now - info_received_).count());
     if (!supported_ || !client_->isConnected())
     {
       if (reserved_)
@@ -262,7 +270,8 @@ public:
       query_pending_ = false;
       if (reserved_ && submitted_ && !terminal_)
         ++operation_query_timeouts_;
-      update(Feedback::Unknown);
+      if (!reserved_ || !submitted_ || terminal_ || stop_requested_)
+        update(Feedback::Unknown);
     }
     if (!query_pending_ && now - queried_ >= std::chrono::milliseconds(100))
     {
@@ -305,7 +314,7 @@ public:
         failure_reason_ = "Undocking deadline exceeded";
       else if (!mode_ready)
         failure_reason_ = "Confirmed drive mode lost during undocking";
-      else if (!infoFresh(now))
+      else if (!infoFresh(now, undocking_feedback_timeout_sec_))
       {
         const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - operation_started_).count();
         const auto info_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - info_received_).count();
@@ -459,14 +468,15 @@ private:
 
   std::string failureContext(TimePoint now) const
   {
-    return failure_reason_ + "; last dockInfo state=" +
+    return failure_reason_ + "; max_observed_info_gap_ms=" + std::to_string(max_info_gap_ms_) +
+           "; last dockInfo state=" +
            (have_info_ ? std::to_string(static_cast<unsigned int>(info_.state)) : "unknown") + " (" +
            (infoFresh(now) ? "fresh" : "stale or unavailable") + ")";
   }
 
-  bool infoFresh(TimePoint now) const
+  bool infoFresh(TimePoint now, double timeout_sec = 1.0) const
   {
-    return have_info_ && now - info_received_ < std::chrono::seconds(1);
+    return have_info_ && now >= info_received_ && std::chrono::duration<double>(now - info_received_).count() < timeout_sec;
   }
 
   bool stationary(TimePoint now) const
@@ -487,6 +497,9 @@ private:
       fail();
       return;
     }
+    if (reserved_ && have_info_)
+      max_info_gap_ms_ = std::max(max_info_gap_ms_,
+                                  std::chrono::duration_cast<std::chrono::milliseconds>(now - info_received_).count());
     have_info_ = true;
     info_received_ = now;
     last_reply_after_latest_query_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(now - queried_).count();
@@ -544,7 +557,8 @@ private:
       transition(State::Failed);
     }
     else if (!have_feedback_ || now < received_ ||
-             std::chrono::duration<double>(now - received_).count() >= feedback_timeout_sec_)
+         std::chrono::duration<double>(now - received_).count() >=
+           (state_ == State::Undocking ? undocking_feedback_timeout_sec_ : feedback_timeout_sec_))
     {
       transition(state_ == State::Undocking ? State::Failed : State::Unknown);
     }
@@ -553,6 +567,7 @@ private:
   UndockRequest request_;
   double feedback_timeout_sec_;
   double undock_timeout_sec_;
+  double undocking_feedback_timeout_sec_;
   double operation_timeout_sec_{ 30.0 };
   std::mutex mutex_;
   State state_{ State::Unknown };
@@ -571,6 +586,7 @@ private:
   TimePoint queried_{}, info_received_{}, telemetry_received_{}, stationary_since_{}, operation_started_{},
       stop_started_{};
   std::chrono::milliseconds::rep last_reply_after_latest_query_ms_{ 0 };
+  std::chrono::milliseconds::rep max_info_gap_ms_{ 0 };
   unsigned int operation_query_timeouts_{ 0 };
   bool supported_{ false }, mode_ready_{ false }, contact_confirmed_{ false }, query_pending_{ false };
   bool have_info_{ false }, zero_velocity_{ false }, reserved_{ false }, request_pending_{ false };

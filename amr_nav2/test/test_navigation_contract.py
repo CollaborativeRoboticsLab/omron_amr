@@ -25,7 +25,8 @@ def test_ld250_undocking_parameters_match_core():
     config = yaml.safe_load((PACKAGE.parent / 'amr_ros/config/ld250_parameters.yaml').read_text())
     undocking = config['amr_core']['ros__parameters']['driver']['undocking']
     assert {'start_from_dock', 'contact_dock_confirmed', 'exclusive_control_confirmed',
-            'dock_type', 'undock_timeout_sec'} <= undocking.keys()
+            'dock_type', 'undock_timeout_sec', 'feedback_timeout_sec'} <= undocking.keys()
+    assert undocking['feedback_timeout_sec'] == 5.0
     core = (PACKAGE.parent / 'amr_core/include/amr_core/core_node.hpp').read_text()
     drive = (PACKAGE.parent / 'amr_core/include/amr_core/interfaces/drive_interface.hpp').read_text()
     assert '"driver.undocking.exclusive_control_confirmed"' in core
@@ -34,6 +35,7 @@ def test_ld250_undocking_parameters_match_core():
     assert '"driver.undocking.contact_dock_confirmed"' in drive
     assert '"driver.undocking.start_from_dock"' in drive
     assert '"driver.undocking.undock_timeout_sec"' in drive
+    assert '"driver.undocking.feedback_timeout_sec"' in drive
 
 
 def launch_calls(name):

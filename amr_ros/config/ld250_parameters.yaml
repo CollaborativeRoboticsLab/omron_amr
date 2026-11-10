@@ -100,6 +100,7 @@ amr_core:
       undocking:
         start_from_dock: false
         exclusive_control_confirmed: true
-        contact_dock_confirmed: false
+        contact_dock_confirmed: true
         dock_type: "omron"
         undock_timeout_sec: 30.0
+        feedback_timeout_sec: 5.0

@@ -24,7 +24,8 @@ TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnfor
           "robot.ip:=127.0.0.1", "-p", port_argument.c_str(), "-p", "robot.user:=loopback", "-p", "robot.protocol:=''",
           "-p", "status.publish:=false", "-p", "laser.main_laser.enabled:=false", "-p", "driver.tf.enabled:=false",
           "-p", "driver.cmd_vel.topic:=/drive_test/cmd_vel", "-p", "driver.undocking.dock_type:=test_dock",
-          "-p", "driver.undocking.undock_timeout_sec:=12.5", static_cast<char*>(nullptr));
+          "-p", "driver.undocking.undock_timeout_sec:=12.5", "-p", "driver.undocking.feedback_timeout_sec:=5.0",
+          static_cast<char*>(nullptr));
     _exit(127);
   }
   std::vector<std::string> warnings;
@@ -48,12 +49,14 @@ TEST_F(DriverInterfaceLoopbackTest, CoreNodeUndockActionUsesNav2ContractAndEnfor
   }));
   auto parameters = std::make_shared<rclcpp::AsyncParametersClient>(node_, "/dock_action_test/core_node");
   ASSERT_TRUE(waitWithExecutor([&parameters]() { return parameters->service_is_ready(); }));
-  auto configured = parameters->get_parameters({ "driver.undocking.dock_type", "driver.undocking.undock_timeout_sec" });
+  auto configured = parameters->get_parameters({ "driver.undocking.dock_type", "driver.undocking.undock_timeout_sec",
+                                                  "driver.undocking.feedback_timeout_sec" });
   ASSERT_TRUE(waitWithExecutor([&configured]() { return configured.wait_for(0ms) == std::future_status::ready; }));
   const auto values = configured.get();
-  ASSERT_EQ(values.size(), 2u);
+  ASSERT_EQ(values.size(), 3u);
   EXPECT_EQ(values[0].as_string(), "test_dock");
   EXPECT_DOUBLE_EQ(values[1].as_double(), 12.5);
+  EXPECT_DOUBLE_EQ(values[2].as_double(), 5.0);
   auto confirmed = parameters->set_parameters({ rclcpp::Parameter("driver.undocking.contact_dock_confirmed", true),
                                                 rclcpp::Parameter("driver.undocking.exclusive_control_confirmed", true) });
   ASSERT_TRUE(waitWithExecutor([&confirmed]() { return confirmed.wait_for(0ms) == std::future_status::ready; }));

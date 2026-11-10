@@ -214,7 +214,8 @@ public:
       if (!start_from_dock)
         RCLCPP_WARN(node_->get_logger(), "Starting away from dock is asserted; docking feedback may be unavailable");
       docking_ = std::make_shared<amr_core::DockingInterface>(amr_core::DockingInterface::UndockRequest{}, 1.0,
-          getOrDeclareParameter<double>("driver.undocking.undock_timeout_sec", 30.0), start_from_dock);
+          getOrDeclareParameter<double>("driver.undocking.undock_timeout_sec", 30.0), start_from_dock,
+          getOrDeclareParameter<double>("driver.undocking.feedback_timeout_sec", 1.0));
         docking_->attach(client_, getOrDeclareParameter<bool>("driver.undocking.contact_dock_confirmed", false));
     }
     configureDriveMode();

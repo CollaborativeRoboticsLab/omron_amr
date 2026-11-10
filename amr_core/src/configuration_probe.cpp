@@ -367,7 +367,8 @@ int main(int argc, char** argv)
                     std::string(argv[1]) != "config-capture" && std::string(argv[1]) != "observe" &&
                     std::string(argv[1]) != "map-discovery" && std::string(argv[1]) != "map-status" &&
                     std::string(argv[1]) != "power-discovery" && std::string(argv[1]) != "docking-discovery" &&
-                    std::string(argv[1]) != "docking-status" && std::string(argv[1]) != "map-snapshot" &&
+                    std::string(argv[1]) != "docking-status" && std::string(argv[1]) != "docking-changed-status" &&
+                    std::string(argv[1]) != "map-snapshot" &&
                     std::string(argv[1]) != "map-upload" && std::string(argv[1]) != "map-upload-named" &&
                     std::string(argv[1]) != "map-download" && std::string(argv[1]) != "map-activate" &&
                     std::string(argv[1]) != "map-config" &&
@@ -376,7 +377,7 @@ int main(int argc, char** argv)
   {
     std::cerr << "Usage: amr_hardware_probe "
                  "connectivity|config|config-capture|observe|map-discovery|map-status|power-discovery|docking-"
-                 "discovery|docking-status|map-snapshot|map-download|map-upload|map-upload-named|map-activate|map-config|debug-discovery|debug-status (connection details on stdin)\n";
+                 "discovery|docking-status|docking-changed-status|map-snapshot|map-download|map-upload|map-upload-named|map-activate|map-config|debug-discovery|debug-status (connection details on stdin)\n";
     return 2;
   }
   std::string host, port, user, password, protocol;
@@ -595,16 +596,30 @@ int main(int argc, char** argv)
         std::cout << "DOCKING_SERVICES " << services.dump() << std::endl;
         result = 0;
       }
-      else if (std::string(argv[1]) == "docking-status")
+      else if (std::string(argv[1]) == "docking-status" || std::string(argv[1]) == "docking-changed-status")
       {
-        const bool ready = client.dataExists("dockInfo") && client.addHandler("dockInfo", &docking) &&
-                           client.requestOnce("dockInfo", nullptr, true);
+        const bool changed = std::string(argv[1]) == "docking-changed-status";
+        const char* request = changed ? "dockInfoChanged" : "dockInfo";
+        const bool available = client.dataExists(request);
+        const bool handler_added = available && client.addHandler(request, &docking);
+        const bool once_queued = handler_added && client.requestOnce(request, nullptr, true);
+        const bool subscribed = changed && once_queued && client.request(request, -1);
+        const bool ready = once_queued && (!changed || subscribed);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
         while (ready && client.isConnected() && observation.docking_samples == 0 && !observation.malformed &&
                std::chrono::steady_clock::now() < deadline)
         {
           client.loopOnce();
         }
+        if (subscribed)
+          client.requestStop(request);
+        if (changed)
+          std::cout << "DOCK_CHANGED_DIAGNOSTIC "
+                    << nlohmann::json({ { "available", available }, { "handler_added", handler_added },
+                                        { "once_queued", once_queued }, { "subscribed", subscribed },
+                                        { "samples", observation.docking_samples },
+                                        { "malformed", observation.malformed }, { "connected", client.isConnected() },
+                                        { "transport_fault", client.hasTransportFailure() } }).dump() << std::endl;
         result = observation.docking_samples > 0 && !observation.malformed ? 0 : 1;
       }
       else if (std::string(argv[1]) == "config-capture")

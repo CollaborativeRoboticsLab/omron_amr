@@ -72,6 +72,20 @@ TEST(DockingInterface, AwayFromDockAssertionIsRevokedByDockedFeedback)
   EXPECT_FALSE(docking.readiness(now + 1s).unverified_start_allowed);
 }
 
+TEST(DockingInterface, UndockingFeedbackTimeoutIsIndependentOfNormalFreshness)
+{
+  Docking docking([]() { return true; }, 1.0, 30.0, true, 5.0);
+  const auto now = Docking::Clock::now();
+  docking.update(Docking::Feedback::Docked, now);
+  ASSERT_TRUE(docking.requestUndock(now));
+  EXPECT_EQ(docking.readiness(now + 4999ms).state, Docking::State::Undocking);
+  EXPECT_EQ(docking.readiness(now + 5s).state, Docking::State::Failed);
+  EXPECT_THROW(Docking({}, 1.0, 30.0, true, 0.0), std::invalid_argument);
+  EXPECT_THROW(Docking({}, 1.0, 30.0, true, -1.0), std::invalid_argument);
+  EXPECT_THROW(Docking({}, 1.0, 30.0, true, std::numeric_limits<double>::infinity()), std::invalid_argument);
+  EXPECT_THROW(Docking({}, 1.0, 30.0, true, std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+}
+
 TEST_F(DriverInterfaceLoopbackTest, UndockedStartupCanDriveWithoutDockingBackend)
 {
   node_->declare_parameter<bool>("driver.undocking.start_from_dock", false);
@@ -288,7 +302,8 @@ TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReser
   initializeDockingBackend();
   const char* reason = nullptr;
   EXPECT_FALSE(docking_->reserveUndock(false, false, 30.0, &reason));
-  EXPECT_STREQ(reason, "driver.undocking.contact_dock_confirmed and driver.undocking.exclusive_control_confirmed are false");
+  EXPECT_STREQ(reason, "driver.undocking.contact_dock_confirmed and driver.undocking.exclusive_control_confirmed are "
+                       "false");
   EXPECT_FALSE(docking_->reserveUndock(false, true, 30.0, &reason));
   EXPECT_STREQ(reason, "driver.undocking.contact_dock_confirmed is false");
   EXPECT_FALSE(docking_->reserveUndock(true, false, 30.0, &reason));
@@ -327,6 +342,12 @@ TEST_F(DriverInterfaceLoopbackTest, DockingFeedbackGapLatchesFailureAfterFreshUn
     std::lock_guard<std::mutex> lock(mutex_);
     EXPECT_EQ(undock_requests_, 1);
     EXPECT_GE(suppressed_docking_queries_, 1);
+  }
+  const auto stop_observed = std::chrono::steady_clock::now();
+  ASSERT_TRUE(
+      waitWithExecutor([stop_observed]() { return std::chrono::steady_clock::now() - stop_observed >= 500ms; }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
     suppress_docking_replies_ = false;
   }
   ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
@@ -344,7 +365,112 @@ TEST_F(DriverInterfaceLoopbackTest, DockingFeedbackGapLatchesFailureAfterFreshUn
   EXPECT_NE(status.message.find("query_pending="), std::string::npos);
   EXPECT_NE(status.message.find("query_age_ms="), std::string::npos);
   EXPECT_NE(status.message.find("query_timeouts="), std::string::npos);
+  const std::string gap_field = "max_observed_info_gap_ms=";
+  const auto gap_position = status.message.find(gap_field);
+  ASSERT_NE(gap_position, std::string::npos);
+  EXPECT_GE(std::stoll(status.message.substr(gap_position + gap_field.size())), 1450);
   EXPECT_NE(status.message.find("last dockInfo state=0 (fresh)"), std::string::npos);
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Failed);
+  docking_->finishUndock();
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ConfiguredFeedbackGapAllowsReplyBeforeTimeout)
+{
+  node_->declare_parameter<double>("driver.undocking.feedback_timeout_sec", 5.0);
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_after_undock_ = true;
+  }
+  ASSERT_TRUE(docking_->reserveUndock(true, true));
+  docking_->beginUndock();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return suppressed_docking_queries_ > 0;
+  }));
+  const auto gap_started = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([gap_started]() { return std::chrono::steady_clock::now() - gap_started >= 1500ms; }));
+  EXPECT_FALSE(docking_->operationStatus().terminal);
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Undocking);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_TRUE(records_.empty());
+    suppress_docking_replies_ = false;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
+  EXPECT_TRUE(docking_->operationStatus().success);
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(records_.empty());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ConfiguredFeedbackGapStopsAndLatchesAtTimeout)
+{
+  node_->declare_parameter<double>("driver.undocking.feedback_timeout_sec", 5.0);
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_after_undock_ = true;
+  }
+  ASSERT_TRUE(docking_->reserveUndock(true, true));
+  docking_->beginUndock();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return suppressed_docking_queries_ > 0;
+  }));
+  const auto gap_started = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([gap_started]() { return std::chrono::steady_clock::now() - gap_started >= 2500ms; }));
+  EXPECT_FALSE(docking_->operationStatus().terminal);
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    EXPECT_EQ(undock_requests_, 1);
+    suppress_docking_replies_ = false;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
+  const auto status = docking_->operationStatus();
+  EXPECT_FALSE(status.success);
+  EXPECT_TRUE(status.stationary_observed);
+  EXPECT_NE(status.message.find("Docking feedback stale during undocking"), std::string::npos);
+  const std::string age_field = "last_info_age_ms=";
+  const auto age_position = status.message.find(age_field);
+  ASSERT_NE(age_position, std::string::npos);
+  EXPECT_GE(std::stoll(status.message.substr(age_position + age_field.size())), 5000);
+  EXPECT_EQ(docking_->readiness().state, Docking::State::Failed);
+  docking_->finishUndock();
+}
+
+TEST_F(DriverInterfaceLoopbackTest, MalformedFeedbackStillStopsConfiguredUndock)
+{
+  node_->declare_parameter<double>("driver.undocking.feedback_timeout_sec", 5.0);
+  initializeDockingBackend();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    suppress_docking_after_undock_ = true;
+  }
+  ASSERT_TRUE(docking_->reserveUndock(true, true));
+  docking_->beginUndock();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return suppressed_docking_queries_ > 0;
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 4;
+    suppress_docking_replies_ = false;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fake_docking_state_ = 0;
+  }
+  ASSERT_TRUE(waitWithExecutor([this]() { return docking_->operationStatus().terminal; }));
+  EXPECT_FALSE(docking_->operationStatus().success);
   EXPECT_EQ(docking_->readiness().state, Docking::State::Failed);
   docking_->finishUndock();
 }
