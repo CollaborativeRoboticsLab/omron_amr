@@ -67,6 +67,8 @@ RViz starts by default; pass `use_rviz:=false` to disable it.
 
 The SLAM launch publishes a map with a 1 m unknown border on `map`; the unmodified SLAM grid is available on `slam_map_raw`. The default Nav2 planner does not plan through unknown space in SLAM mode. Padding does not add obstacle observations, and does not establish that navigation is safe. Custom SLAM parameters must use the default `/map` topic for this padding pipeline.
 
+Both costmaps use `/scan` by default. For a namespaced robot, configure both costmap observation-source topics to its actual laser scan topic. Verify live obstacles and inflation in both costmaps before navigation.
+
 
 ```sh
 source install/setup.bash

@@ -21,6 +21,27 @@ def navigation_parameters():
     return yaml.safe_load((PACKAGE / 'config' / 'ld250_nav2.yaml').read_text())
 
 
+def test_ld250_costmaps_use_robot_scan_and_inflation():
+    parameters = navigation_parameters()
+    for name, layer in (('local_costmap', 'voxel_layer'), ('global_costmap', 'obstacle_layer')):
+        costmap = parameters[name][name]['ros__parameters']
+        assert costmap[layer]['scan']['topic'] == '/scan'
+        assert costmap[layer]['scan']['marking'] is True
+        assert costmap[layer]['scan']['clearing'] is True
+        assert costmap['plugins'][-1] == 'inflation_layer'
+        assert costmap['inflation_layer']['inflation_radius'] > 0
+
+
+def test_ld250_rviz_shows_combined_costmaps():
+    rviz = yaml.safe_load((PACKAGE.parent / 'amr_ros/rviz/rviz_ld250.rviz').read_text())
+    displays = {display['Name']: display for display in rviz['Visualization Manager']['Displays']}
+    for name in ('Global Costmap', 'Local Costmap'):
+        assert displays[name]['Enabled'] is True
+        assert displays[name]['Color Scheme'] == 'costmap'
+    for name in ('Global Static Layer', 'Global Obstacle Layer', 'Local Voxel Layer'):
+        assert displays[name]['Enabled'] is False
+
+
 def test_ld250_undocking_parameters_match_core():
     config = yaml.safe_load((PACKAGE.parent / 'amr_ros/config/ld250_parameters.yaml').read_text())
     undocking = config['amr_core']['ros__parameters']['driver']['undocking']
