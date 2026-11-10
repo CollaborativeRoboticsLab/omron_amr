@@ -4,7 +4,9 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterFile
 from ament_index_python.packages import get_package_share_directory
+from nav2_common.launch import RewrittenYaml
 
 def load_file(package_name, file_path):
     package_path = get_package_share_directory(package_name)
@@ -21,6 +23,8 @@ def _create_nodes(context):
     params_file = LaunchConfiguration('params_file').perform(context)
     robot_description_override = LaunchConfiguration('robot_description_override')
     extra_params_file = LaunchConfiguration('extra_params_file').perform(context)
+    namespace = LaunchConfiguration('namespace')
+    remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
     robot_description = {'robot_description': load_file('amr_description', 'urdf/LD250.urdf')}
 
@@ -28,6 +32,8 @@ def _create_nodes(context):
         package='robot_state_publisher',
         executable='robot_state_publisher',
         name='robot_state_publisher',
+        namespace=namespace,
+        remappings=remappings,
         output='log',
         parameters=[robot_description],
         condition=UnlessCondition(robot_description_override)
@@ -36,11 +42,16 @@ def _create_nodes(context):
     parameter_files = [params_file]
     if extra_params_file:
         parameter_files.append(extra_params_file)
+    parameter_files = [ParameterFile(RewrittenYaml(
+        source_file=path, root_key=namespace, param_rewrites={}, convert_types=True))
+        for path in parameter_files]
 
     core = Node(
         package='amr_core',
         executable='amr_core',
         name='amr_core',
+        namespace=namespace,
+        remappings=remappings,
         output='screen',
         parameters=parameter_files,
     )
@@ -69,7 +80,13 @@ def generate_launch_description():
         description='Optional extra ROS parameter file layered on top of the default amr_ros parameters'
     )
 
+    declare_namespace = DeclareLaunchArgument(
+        'namespace', default_value='',
+        description='Robot namespace; TF topics are isolated and frame IDs remain unchanged.',
+    )
+
     return LaunchDescription([
+        declare_namespace,
         declare_params_file,
         declare_robot_description_override,
         declare_extra_params_file,

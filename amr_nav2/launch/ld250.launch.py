@@ -7,9 +7,8 @@ from launch.actions import (DeclareLaunchArgument, GroupAction,
                             IncludeLaunchDescription, SetEnvironmentVariable)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import IfElseSubstitution, LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.actions import PushRosNamespace
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml, ReplaceString
 
@@ -21,7 +20,8 @@ def generate_launch_description():
     package_dir = get_package_share_directory('amr_nav2')
 
     # Create the launch configuration variables
-    namespace       = LaunchConfiguration('namespace')
+    namespace       = IfElseSubstitution(
+        LaunchConfiguration('use_namespace'), LaunchConfiguration('namespace'), '')
     use_sim_time    = LaunchConfiguration('use_sim_time')
     autostart       = LaunchConfiguration('autostart')
     params_file     = LaunchConfiguration('params_file')
@@ -46,6 +46,11 @@ def generate_launch_description():
         source_file=params_file,
         replacements={'<robot_namespace>': ('/', namespace)},
         condition=IfCondition(use_namespace))
+
+    navigation_params_file = IfElseSubstitution(
+        slam,
+        RewrittenYaml(source_file=params_file, param_rewrites={'allow_unknown': 'False'}, convert_types=True),
+        params_file)
 
     configured_params = ParameterFile(
         RewrittenYaml(
@@ -91,7 +96,7 @@ def generate_launch_description():
     
     declare_use_namespace_cmd = DeclareLaunchArgument(
         'use_namespace',
-        default_value='False',
+        default_value='True',
         description='Whether to apply a namespace to the navigation stack')
 
     declare_slam_cmd = DeclareLaunchArgument(
@@ -101,11 +106,8 @@ def generate_launch_description():
 
     # Specify the actions
     bringup_cmd_group = GroupAction([
-        PushRosNamespace(
-            condition=IfCondition(use_namespace),
-            namespace=namespace),
-
         Node(
+            namespace=namespace,
             condition=IfCondition(use_composition),
             name='nav2_container',
             package='rclcpp_components',
@@ -129,7 +131,7 @@ def generate_launch_description():
             launch_arguments={'namespace': namespace,
                               'use_sim_time': use_sim_time,
                               'autostart': autostart,
-                              'params_file': params_file,
+                              'params_file': navigation_params_file,
                               'use_composition': use_composition,
                               'use_respawn': use_respawn,
                               'container_name': 'nav2_container'}.items()),

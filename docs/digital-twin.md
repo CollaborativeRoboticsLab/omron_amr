@@ -18,8 +18,8 @@ For a simulation-authoritative setup, the libaria-backed driver can remain comma
 - `status.publish`
 - `laser.main_laser.enabled`
 - `laser.low_laser.enabled`
-- `driver.publish_odom`
-- `driver.publish_robot_tf`
+- `driver.odom.publish`
+- `driver.tf.enabled`
 
 ## Example override
 

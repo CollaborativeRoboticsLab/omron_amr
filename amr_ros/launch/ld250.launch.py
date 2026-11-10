@@ -7,16 +7,22 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    rviz = LaunchConfiguration('rviz')
+    use_rviz = LaunchConfiguration('use_rviz')
     use_nav2 = LaunchConfiguration('use_nav2')
     use_slam = LaunchConfiguration('use_slam')
     extra_params_file = LaunchConfiguration('extra_params_file')
     robot_description_override = LaunchConfiguration('robot_description_override')
     nav2_params_file = LaunchConfiguration('nav2_params_file')
+    namespace = LaunchConfiguration('namespace')
 
-    declare_rviz = DeclareLaunchArgument(
-        'rviz',
-        default_value='false',
+    declare_namespace = DeclareLaunchArgument(
+        'namespace', default_value='',
+        description='Robot namespace shared by hardware and Nav2.',
+    )
+
+    declare_use_rviz = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
         description='Launch RViz with the LD250 configuration.',
     )
 
@@ -59,6 +65,7 @@ def generate_launch_description():
             ])
         ),
         launch_arguments={
+            'namespace': namespace,
             'params_file': PathJoinSubstitution([FindPackageShare('amr_ros'), 'config', 'ld250_parameters.yaml']),
             'extra_params_file': extra_params_file,
             'robot_description_override': robot_description_override,
@@ -73,7 +80,8 @@ def generate_launch_description():
                 'ld250_rviz.launch.py',
             ])
         ),
-        condition=IfCondition(rviz),
+        condition=IfCondition(use_rviz),
+        launch_arguments={'namespace': namespace}.items(),
     )
 
     nav2_launch = IncludeLaunchDescription(
@@ -86,13 +94,15 @@ def generate_launch_description():
         ),
         condition=IfCondition(use_nav2),
         launch_arguments={
+            'namespace': namespace,
             'params_file': nav2_params_file,
             'slam': use_slam,
         }.items(),
     )
 
     return LaunchDescription([
-        declare_rviz,
+        declare_namespace,
+        declare_use_rviz,
         declare_use_nav2,
         declare_use_slam,
         declare_robot_description_override,

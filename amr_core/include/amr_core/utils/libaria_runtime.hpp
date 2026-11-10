@@ -38,14 +38,23 @@ inline void configureAriaDirectory()
 class LibAriaRuntime
 {
 public:
-  LibAriaRuntime()
+  enum class Logging { Normal, Silent };
+
+  explicit LibAriaRuntime(Logging logging = Logging::Normal)
   {
     std::lock_guard<std::mutex> lock(detail::ariaMutex());
     if (detail::ariaRefCount() == 0)
     {
       detail::configureAriaDirectory();
+      if (logging == Logging::Silent)
+      {
+        ArLog::init(ArLog::None, ArLog::Terse, "", false, false, false);
+      }
       Aria::init();
-      ArLog::init(ArLog::StdOut, ArLog::Normal);
+      if (logging == Logging::Normal)
+      {
+        ArLog::init(ArLog::StdOut, ArLog::Normal);
+      }
     }
     ++detail::ariaRefCount();
   }

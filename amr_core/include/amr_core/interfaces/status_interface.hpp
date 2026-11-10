@@ -1,5 +1,7 @@
 #pragma once
 
+#include "amr_core/utils/drive_telemetry.hpp"
+
 #include <ArNetworking/ArNetworking.h>
 
 #include <amr_msgs/msg/location.hpp>
@@ -128,20 +130,17 @@ private:
 
   void handleUpdateNumbers(ArNetPacket* packet)
   {
-    const double state_of_charge = static_cast<double>(packet->bufToByte2()) / 10.0;
-    const double x = static_cast<double>(packet->bufToByte4());
-    const double y = static_cast<double>(packet->bufToByte4());
-    const double theta = static_cast<double>(packet->bufToByte2());
-    packet->bufToByte2();
-    packet->bufToByte2();
-    packet->bufToByte2();
-    packet->bufToByte();
+    amr_core::DriveTelemetry telemetry;
+    if (!amr_core::readDriveTelemetry(packet, telemetry))
+    {
+      return;
+    }
 
     std::lock_guard<std::mutex> lock(status_mutex_);
-    latest_status_.state_of_charge = static_cast<float>(state_of_charge);
-    latest_status_.location.x = x;
-    latest_status_.location.y = y;
-    latest_status_.location.theta = theta;
+    latest_status_.state_of_charge = static_cast<float>(telemetry.state_of_charge_tenths) / 10.0f;
+    latest_status_.location.x = telemetry.x_mm;
+    latest_status_.location.y = telemetry.y_mm;
+    latest_status_.location.theta = telemetry.heading_deg;
   }
 
   void handleUpdateStrings(ArNetPacket* packet)
