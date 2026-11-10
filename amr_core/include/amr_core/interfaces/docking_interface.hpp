@@ -100,11 +100,11 @@ public:
     else if (!mode_ready_)
       reason = "drive mode is not confirmed";
     else if (!confirm_contact && !confirm_exclusive)
-      reason = "driver.docking.contact_dock_confirmed and driver.drive.exclusive_control_confirmed are false";
+      reason = "driver.undocking.contact_dock_confirmed and driver.undocking.exclusive_control_confirmed are false";
     else if (!confirm_contact)
-      reason = "driver.docking.contact_dock_confirmed is false";
+      reason = "driver.undocking.contact_dock_confirmed is false";
     else if (!confirm_exclusive)
-      reason = "driver.drive.exclusive_control_confirmed is false";
+      reason = "driver.undocking.exclusive_control_confirmed is false";
     else if (!infoFresh(now))
       reason = "docking feedback is missing or stale";
     else if (info_.forced)

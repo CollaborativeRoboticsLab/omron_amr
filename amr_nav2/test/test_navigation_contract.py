@@ -21,6 +21,21 @@ def navigation_parameters():
     return yaml.safe_load((PACKAGE / 'config' / 'ld250_nav2.yaml').read_text())
 
 
+def test_ld250_undocking_parameters_match_core():
+    config = yaml.safe_load((PACKAGE.parent / 'amr_ros/config/ld250_parameters.yaml').read_text())
+    undocking = config['amr_core']['ros__parameters']['driver']['undocking']
+    assert {'start_from_dock', 'contact_dock_confirmed', 'exclusive_control_confirmed',
+            'dock_type', 'undock_timeout_sec'} <= undocking.keys()
+    core = (PACKAGE.parent / 'amr_core/include/amr_core/core_node.hpp').read_text()
+    drive = (PACKAGE.parent / 'amr_core/include/amr_core/interfaces/drive_interface.hpp').read_text()
+    assert '"driver.undocking.exclusive_control_confirmed"' in core
+    assert '"driver.undocking.contact_dock_confirmed"' in core
+    assert '"driver.undocking.dock_type"' in core
+    assert '"driver.undocking.contact_dock_confirmed"' in drive
+    assert '"driver.undocking.start_from_dock"' in drive
+    assert '"driver.undocking.undock_timeout_sec"' in drive
+
+
 def launch_calls(name):
     tree = ast.parse(LAUNCH.read_text())
     return [call for call in ast.walk(tree)

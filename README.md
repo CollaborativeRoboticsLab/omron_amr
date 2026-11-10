@@ -82,7 +82,7 @@ ros2 launch amr_ros ld250.launch.py use_nav2:=true use_localization:=true map:=m
 
 ### Undock separately
 
-Navigation and velocity commands do not initiate undocking. With the hardware interface running, undocking is a separate `nav2_msgs/action/UndockRobot` action. It requires verified contact docking, exclusive control, fresh docking feedback, and stationary telemetry. `driver.docking.contact_dock_confirmed` is read at startup; `driver.drive.exclusive_control_confirmed` also defaults to false. Set these confirmations only after verifying the corresponding conditions.
+Navigation and velocity commands do not initiate undocking. With the hardware interface running, undocking is a separate `nav2_msgs/action/UndockRobot` action. It requires verified contact docking, exclusive control, fresh docking feedback, and stationary telemetry. `driver.undocking.contact_dock_confirmed` is read at startup; `driver.undocking.exclusive_control_confirmed` also defaults to false. Set these confirmations only after verifying the corresponding conditions.
 
 For an explicitly authorized, supervised departure, send one goal:
 

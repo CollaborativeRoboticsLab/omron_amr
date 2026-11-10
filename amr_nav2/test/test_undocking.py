@@ -73,7 +73,7 @@ def test_one_supervised_contact_dock_departure(pytestconfig, robot_settings):
             '-r', '__node:=amr_core', '-r', 'undock_robot:=/undock_acceptance/undock_robot',
             '-p', 'status.publish:=false', '-p', 'laser.main_laser.enabled:=false',
             '-p', 'laser.low_laser.enabled:=false', '-p', 'driver.tf.enabled:=false',
-            '-p', 'driver.docking.contact_dock_confirmed:=true', '-p', 'driver.drive.exclusive_control_confirmed:=true',
+            '-p', 'driver.undocking.contact_dock_confirmed:=true', '-p', 'driver.undocking.exclusive_control_confirmed:=true',
             '-p', 'driver.cmd_vel.topic:=unused_cmd_vel'], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, start_new_session=True)
         rclpy.init()

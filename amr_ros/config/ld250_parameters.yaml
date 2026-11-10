@@ -39,12 +39,23 @@ amr_core:
 
     fault:
       auto_acknowledge_fault_list: ["IrregularShutdown"]
+      ack:
+        exclusive_control_confirmed: false
       ros_service:
         enabled: false
         name: "acknowledge_fault"
       monitor:
         enabled: true
         auto_acknowledge_enabled: false
+
+    map:
+      ros_service:
+        enabled: false
+        name: "map/get_active_map"
+
+    shutdown:
+      enabled: false
+      exclusive_control_confirmed: false
 
     driver:
       odom:
@@ -69,6 +80,7 @@ amr_core:
         tcp_queue_max_age_sec: 0.1
       drive:
         send_frequency: 20.0
+        ready_topic: "amr/drive_ready"
         throttle_pct: 100.0
         ratio_mapping: "legacy"
         unsafe_drive: true
@@ -89,3 +101,5 @@ amr_core:
         start_from_dock: false
         exclusive_control_confirmed: true
         contact_dock_confirmed: false
+        dock_type: "omron"
+        undock_timeout_sec: 30.0

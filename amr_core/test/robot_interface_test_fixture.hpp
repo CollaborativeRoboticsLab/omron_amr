@@ -216,7 +216,7 @@ protected:
     enableFaultAcknowledgementBackend();
     ASSERT_TRUE(server_.addData("getFaults", "query faults", &faults_callback_, "none", "faults"));
     node_->declare_parameter<bool>("fault.ack.exclusive_control_confirmed", true);
-    node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
+    node_->declare_parameter<bool>("driver.undocking.contact_dock_confirmed", true);
     node_->declare_parameter<bool>("fault.monitor.auto_acknowledge_enabled", true);
     node_->declare_parameter<std::vector<std::string>>("fault.auto_acknowledge_fault_list", { "IrregularShutdown" });
   }

@@ -136,11 +136,11 @@ public:
     if (auto_fault_ack_enabled_ && !fault_monitor_enabled_)
       throw std::invalid_argument("Automatic fault acknowledgement requires fault monitoring");
     if (shutdown_enabled && (!manage_docking_ ||
-        !getOrDeclareParameter<bool>("driver.docking.contact_dock_confirmed", false) ||
+        !getOrDeclareParameter<bool>("driver.undocking.contact_dock_confirmed", false) ||
         !getOrDeclareParameter<bool>("shutdown.exclusive_control_confirmed", false)))
       throw std::invalid_argument("Shutdown requires managed contact docking and exclusive control confirmation");
     if ((fault_service_enabled || auto_fault_ack_enabled_) && (!manage_docking_ ||
-        !getOrDeclareParameter<bool>("driver.docking.contact_dock_confirmed", false) ||
+        !getOrDeclareParameter<bool>("driver.undocking.contact_dock_confirmed", false) ||
         !getOrDeclareParameter<bool>("fault.ack.exclusive_control_confirmed", false)))
       throw std::invalid_argument("Fault acknowledgement requires managed contact docking and exclusive control confirmation");
     cmd_vel_timeout_sec_ = getOrDeclareParameter<double>("driver.cmd_vel.timeout_sec", 0.2);
@@ -210,12 +210,12 @@ public:
     configureHandlers();
     if (manage_docking_)
     {
-      const bool start_from_dock = getOrDeclareParameter<bool>("driver.docking.start_from_dock", true);
+      const bool start_from_dock = getOrDeclareParameter<bool>("driver.undocking.start_from_dock", true);
       if (!start_from_dock)
         RCLCPP_WARN(node_->get_logger(), "Starting away from dock is asserted; docking feedback may be unavailable");
       docking_ = std::make_shared<amr_core::DockingInterface>(amr_core::DockingInterface::UndockRequest{}, 1.0,
-          getOrDeclareParameter<double>("docking.undock_timeout_sec", 30.0), start_from_dock);
-        docking_->attach(client_, getOrDeclareParameter<bool>("driver.docking.contact_dock_confirmed", false));
+          getOrDeclareParameter<double>("driver.undocking.undock_timeout_sec", 30.0), start_from_dock);
+        docking_->attach(client_, getOrDeclareParameter<bool>("driver.undocking.contact_dock_confirmed", false));
     }
     configureDriveMode();
     client_.addCycleCallback(&drive_callback_);

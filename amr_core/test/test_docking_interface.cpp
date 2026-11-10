@@ -74,7 +74,7 @@ TEST(DockingInterface, AwayFromDockAssertionIsRevokedByDockedFeedback)
 
 TEST_F(DriverInterfaceLoopbackTest, UndockedStartupCanDriveWithoutDockingBackend)
 {
-  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  node_->declare_parameter<bool>("driver.undocking.start_from_dock", false);
   bool ready = false;
   auto subscription = node_->create_subscription<std_msgs::msg::Bool>(
       "amr/drive_ready", 10, [&ready](const std_msgs::msg::Bool& message) { ready = message.data; });
@@ -91,7 +91,7 @@ TEST_F(DriverInterfaceLoopbackTest, ForcedDockingFeedbackRevokesUnverifiedStartu
 {
   ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
   ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
-  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  node_->declare_parameter<bool>("driver.undocking.start_from_dock", false);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     fake_docking_state_ = 0;
@@ -111,7 +111,7 @@ TEST_F(DriverInterfaceLoopbackTest, ShutdownCountdownRevokesUnverifiedStartup)
 {
   ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
   ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
-  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  node_->declare_parameter<bool>("driver.undocking.start_from_dock", false);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     fake_docking_state_ = 0;
@@ -131,7 +131,7 @@ TEST_F(DriverInterfaceLoopbackTest, DockedFeedbackStopsUndockedStartupAndStaleFe
 {
   ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
   ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
-  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  node_->declare_parameter<bool>("driver.undocking.start_from_dock", false);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     suppress_docking_replies_ = true;
@@ -244,7 +244,7 @@ TEST_F(DriverInterfaceLoopbackTest, UndockedReadinessRemainsFreshDuringNormalMot
   using Docking = amr_core::DockingInterface;
   ASSERT_TRUE(server_.addData("dockInfo", "docking state", &docking_callback_, "none", "four bytes"));
   ASSERT_TRUE(server_.addData("undock", "departure", &undock_callback_, "none", "none"));
-  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.undocking.contact_dock_confirmed", true);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     fake_docking_state_ = 0;
@@ -284,15 +284,15 @@ TEST_F(DriverInterfaceLoopbackTest, UndockedReadinessRemainsFreshDuringNormalMot
 
 TEST_F(DriverInterfaceLoopbackTest, DockingBackendRequiresExplicitConfirmedReservationAndSettledDeparture)
 {
-  node_->declare_parameter<bool>("driver.docking.start_from_dock", false);
+  node_->declare_parameter<bool>("driver.undocking.start_from_dock", false);
   initializeDockingBackend();
   const char* reason = nullptr;
   EXPECT_FALSE(docking_->reserveUndock(false, false, 30.0, &reason));
-  EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed and driver.drive.exclusive_control_confirmed are false");
+  EXPECT_STREQ(reason, "driver.undocking.contact_dock_confirmed and driver.undocking.exclusive_control_confirmed are false");
   EXPECT_FALSE(docking_->reserveUndock(false, true, 30.0, &reason));
-  EXPECT_STREQ(reason, "driver.docking.contact_dock_confirmed is false");
+  EXPECT_STREQ(reason, "driver.undocking.contact_dock_confirmed is false");
   EXPECT_FALSE(docking_->reserveUndock(true, false, 30.0, &reason));
-  EXPECT_STREQ(reason, "driver.drive.exclusive_control_confirmed is false");
+  EXPECT_STREQ(reason, "driver.undocking.exclusive_control_confirmed is false");
   ASSERT_TRUE(docking_->reserveUndock(true, true, 30.0, &reason));
   EXPECT_EQ(reason, nullptr);
   EXPECT_FALSE(docking_->reserveUndock(true, true, 30.0, &reason));
@@ -396,8 +396,8 @@ TEST_F(DriverInterfaceLoopbackTest, MissingDockingBackendDefaultsToVelocityInhib
 
 TEST_F(DriverInterfaceLoopbackTest, DockedVelocityRemainsInhibitedWithContactAndExclusiveConfirmations)
 {
-  node_->declare_parameter<bool>("driver.docking.contact_dock_confirmed", true);
-  node_->declare_parameter<bool>("driver.drive.exclusive_control_confirmed", true);
+  node_->declare_parameter<bool>("driver.undocking.contact_dock_confirmed", true);
+  node_->declare_parameter<bool>("driver.undocking.exclusive_control_confirmed", true);
   initializeDockingBackend();
   publish(0.2, 0.0);
   const auto blocked = std::chrono::steady_clock::now();
