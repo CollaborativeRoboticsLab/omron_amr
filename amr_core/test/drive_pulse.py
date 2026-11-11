@@ -51,9 +51,46 @@ def stream_command(send_command, send_stop, spin, clock=time.monotonic, duration
         send_stop()
 
 
+def stream_turn(send_command, send_stop, spin, clock=time.monotonic):
+    deadline = clock() + 12.0
+    next_send = clock()
+    last_send = None
+    try:
+        while clock() < deadline:
+            if spin(min(0.01, max(0.0, deadline - clock()))):
+                return
+            now = clock()
+            if last_send is not None and now - last_send >= 0.2:
+                raise GuardFailure('command_stream_stalled')
+            if now >= next_send:
+                send_command()
+                last_send = clock()
+                next_send = last_send + 0.05
+        raise GuardFailure('turn_timeout')
+    finally:
+        send_stop()
+
+
 def require_contact_dock(confirmed):
     if confirmed is not True:
         raise RuntimeError('Contact-dock and disconnected-cable attestation required; no command sent')
+
+
+def record_command_traffic(traffic, message, now):
+    if traffic['expected'] is None or message != traffic['expected']:
+        traffic['last_external'] = now
+
+
+def track_turn(turn, heading, target_degrees, direction=1.0):
+    delta = heading - turn['previous_heading']
+    delta = math.atan2(math.sin(delta), math.cos(delta))
+    if abs(delta) > 0.35:
+        raise GuardFailure('heading_jump')
+    turn['angle'] += delta * direction
+    turn['previous_heading'] = heading
+    if turn['angle'] < -math.radians(10.0):
+        raise GuardFailure('wrong_turn_direction')
+    return turn['angle'] >= math.radians(target_degrees)
 
 
 def main():
@@ -62,12 +99,24 @@ def main():
     parser.add_argument('--scenario', choices=SCENARIOS, required=True)
     parser.add_argument('--duration-sec', type=float, default=0.5)
     parser.add_argument('--confirm-contact-dock-no-cable', action='store_true')
+    parser.add_argument('--existing-driver', action='store_true')
+    parser.add_argument('--target-turn-deg', type=float)
+    parser.add_argument('--expected-heading-rad', type=float)
     args = parser.parse_args()
     max_duration = 6.0 if args.scenario == 'reverse' else 2.0
     if not math.isfinite(args.duration_sec) or args.duration_sec <= 0.0 or args.duration_sec > max_duration:
         parser.error(f'Stream duration must be greater than zero and at most {max_duration:g} seconds')
     if not args.confirm_contact_dock_no_cable:
         parser.error('Movement requires explicit confirmation of a contact dock and no connected cable')
+    if args.existing_driver and (args.scenario not in ('forward', 'left', 'right') or args.duration_sec != 0.5):
+        parser.error('Existing-driver mode only supports a 0.5 second forward or in-place turn test')
+    if args.target_turn_deg is not None and (not args.existing_driver or args.scenario not in ('left', 'right')
+            or not math.isfinite(args.target_turn_deg) or not 0.0 < args.target_turn_deg <= 170.0
+            or args.expected_heading_rad is None or not math.isfinite(args.expected_heading_rad)
+            or abs(args.expected_heading_rad) > math.pi):
+        parser.error('Target turn requires existing-driver turn mode, an angle in (0, 170] degrees, and expected heading')
+    if args.target_turn_deg is None and args.expected_heading_rad is not None:
+        parser.error('Expected heading requires a target turn')
 
     import rclpy
     from geometry_msgs.msg import Twist
@@ -87,6 +136,8 @@ def main():
             or cmd_vel.get('max_linear') != 1000.0 or drive.get('throttle_pct') != 100.0):
         raise RuntimeError('Unexpected driver configuration; no command sent')
     linear, angular = SCENARIOS[args.scenario]
+    if args.existing_driver and args.scenario == 'forward':
+        linear = 0.2
     if not (cmd_vel['min_linear'] / 1000.0 <= linear <= cmd_vel['max_linear'] / 1000.0
             and math.radians(cmd_vel['min_angular']) <= angular <= math.radians(cmd_vel['max_angular'])):
         raise RuntimeError('Scenario exceeds configured speed limits; no command sent')
@@ -100,9 +151,13 @@ def main():
     descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     report = {'state': 'pending', 'scenario': args.scenario, 'command_attempts': 0, 'command_times': [],
               'contact_dock_no_cable_confirmed': True,
-              'linear_x_m_s': linear, 'angular_z_rad_s': angular,
+              'linear_x_m_s': linear, 'angular_z_rad_s': angular, 'existing_driver': args.existing_driver,
               'command_duration_s': args.duration_sec, 'command_frequency_hz': 20.0,
               'stop_acknowledged': False, 'odometry': []}
+    if args.target_turn_deg is not None:
+        report['target_turn_deg'] = args.target_turn_deg
+        report['expected_heading_rad'] = args.expected_heading_rad
+        report['command_duration_s'] = 12.0
 
     def persist():
         data = (json.dumps(report, indent=2, sort_keys=True) + '\n').encode()
@@ -161,14 +216,20 @@ def main():
             '-p', 'driver.cmd_vel.topic:=/drive_acceptance/cmd_vel',
             '-p', 'driver.stop.topic:=/drive_acceptance/stop', '-p', 'driver.odom.topic:=/drive_acceptance/odom',
             '-p', 'driver.drive.ready_topic:=/drive_acceptance/drive_ready']
-        process = subprocess.Popen(driver_command,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        if not args.existing_driver:
+            process = subprocess.Popen(driver_command,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         rclpy.init()
         initialized = True
         node = rclpy.create_node('drive_acceptance_client')
-        command_publisher = node.create_publisher(Twist, '/drive_acceptance/cmd_vel', 1)
-        stop_publisher = node.create_publisher(Empty, '/drive_acceptance/stop', 10)
+        command_topic = '/cmd_vel' if args.existing_driver else '/drive_acceptance/cmd_vel'
+        stop_topic = '/stop' if args.existing_driver else '/drive_acceptance/stop'
+        odom_topic = '/odom' if args.existing_driver else '/drive_acceptance/odom'
+        ready_topic = '/amr/drive_ready' if args.existing_driver else '/drive_acceptance/drive_ready'
+        command_publisher = node.create_publisher(Twist, command_topic, 1)
+        stop_publisher = node.create_publisher(Empty, stop_topic, 10)
         readiness = {'ready': False, 'received_at': 0.0}
+        traffic = {'expected': None, 'last_external': time.monotonic()}
 
         def on_readiness(message):
             readiness['ready'] = message.data
@@ -183,17 +244,26 @@ def main():
                                             1.0 - 2.0 * (orientation.y ** 2 + orientation.z ** 2))}
             samples.append(sample)
 
-        subscription = node.create_subscription(Odometry, '/drive_acceptance/odom', on_odometry, 10)
-        ready_subscription = node.create_subscription(Bool, '/drive_acceptance/drive_ready', on_readiness, 10)
+        def on_command(message):
+            record_command_traffic(traffic, message, time.monotonic())
+
+        subscription = node.create_subscription(Odometry, odom_topic, on_odometry, 10)
+        ready_subscription = node.create_subscription(Bool, ready_topic, on_readiness, 10)
+        command_subscription = node.create_subscription(Twist, command_topic, on_command, 10) if args.existing_driver else None
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
-            if process.poll() is not None:
+            if process is not None and process.poll() is not None:
                 raise RuntimeError('Driver exited before stream')
             rclpy.spin_once(node, timeout_sec=0.05)
-            if (command_publisher.get_subscription_count() == 1 and stop_publisher.get_subscription_count() == 1
+            if args.existing_driver:
+                publishers = node.get_publishers_info_by_topic(command_topic)
+            expected_subscriptions = 2 if args.existing_driver else 1
+            if (command_publisher.get_subscription_count() == expected_subscriptions
+                    and stop_publisher.get_subscription_count() == 1
                     and len(samples) >= 3 and samples[-1]['monotonic'] - samples[0]['monotonic'] >= 1.0
                     and time.monotonic() - samples[-1]['monotonic'] < 0.3 and readiness['ready']
-                    and time.monotonic() - readiness['received_at'] < 0.2):
+                    and time.monotonic() - readiness['received_at'] < 0.2
+                    and (not args.existing_driver or time.monotonic() - traffic['last_external'] >= 2.0)):
                 break
         else:
             raise RuntimeError('Driver or fresh odometry unavailable')
@@ -201,28 +271,44 @@ def main():
             raise RuntimeError('Robot telemetry is not stationary')
         if any(not math.isfinite(value) for sample in samples[-3:] for value in sample.values()):
             raise RuntimeError('Robot telemetry is invalid')
-        if node.count_publishers('/drive_acceptance/cmd_vel') != 1:
+        expected_publishers = 2 if args.existing_driver else 1
+        if node.count_publishers(command_topic) != expected_publishers:
             raise RuntimeError('Unexpected command publisher')
+        if args.existing_driver and sorted(endpoint.node_name for endpoint in publishers) != [
+                node.get_name(), 'velocity_smoother']:
+            raise RuntimeError('Unexpected command publisher identity')
 
         command = Twist()
         command.linear.x = linear
         command.angular.z = angular
+        traffic['expected'] = command
 
         origin = samples[-1]
+        if args.target_turn_deg is not None:
+            heading_difference = origin['heading'] - args.expected_heading_rad
+            if abs(math.atan2(math.sin(heading_difference), math.cos(heading_difference))) > math.radians(3.0):
+                raise RuntimeError('Reported heading changed since the preceding turn')
+        turn = {'previous_heading': origin['heading'], 'angle': 0.0}
 
         def guarded_spin(timeout):
             rclpy.spin_once(node, timeout_sec=timeout)
             sample = samples[-1]
-            if process.poll() is not None:
+            if process is not None and process.poll() is not None:
                 raise GuardFailure('driver_exited')
+            if args.existing_driver and traffic['last_external'] > origin['monotonic']:
+                raise GuardFailure('competing_velocity_command')
             if time.monotonic() - sample['monotonic'] > 0.5:
                 raise GuardFailure('odometry_stale')
             if not readiness['ready'] or time.monotonic() - readiness['received_at'] > 0.2:
                 raise GuardFailure('driver_not_ready')
             if any(not math.isfinite(value) for value in sample.values()):
                 raise GuardFailure('odometry_invalid')
-            if math.hypot(sample['x'] - origin['x'], sample['y'] - origin['y']) > 0.4:
+            displacement_limit = 0.15 if args.target_turn_deg is not None else 0.4
+            if math.hypot(sample['x'] - origin['x'], sample['y'] - origin['y']) > displacement_limit:
                 raise GuardFailure('displacement_limit')
+            if args.target_turn_deg is not None:
+                direction = 1.0 if args.scenario == 'left' else -1.0
+                return track_turn(turn, sample['heading'], args.target_turn_deg, direction)
             heading_change = sample['heading'] - origin['heading']
             if abs(math.atan2(math.sin(heading_change), math.cos(heading_change))) > 0.6:
                 raise GuardFailure('rotation_limit')
@@ -240,17 +326,22 @@ def main():
         report['state'] = 'attempting'
         report['command_attempts'] = 1
         persist()
-        stream_command(send_command, send_stop, guarded_spin, duration=args.duration_sec)
+        if args.target_turn_deg is not None:
+            stream_turn(send_command, send_stop, guarded_spin)
+            report['target_reported_angle_deg'] = math.degrees(turn['angle'])
+        else:
+            stream_command(send_command, send_stop, guarded_spin, duration=args.duration_sec)
         report['state'] = 'stop_requested'
         persist()
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            if process.poll() is not None:
+            if process is not None and process.poll() is not None:
                 raise RuntimeError('Driver exited after stream')
             rclpy.spin_once(node, timeout_sec=0.05)
         report['state'] = 'completed_unverified'
         del subscription
         del ready_subscription
+        del command_subscription
     except Exception as error:
         report['state'] = 'failed_or_uncertain'
         report['failure_type'] = type(error).__name__

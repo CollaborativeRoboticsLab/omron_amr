@@ -68,6 +68,32 @@ TEST(DriveCommandPolicy, ExpiresAtTheSteadyClockBoundary)
   EXPECT_EQ(policy.poll(now + 1s).action, Action::None);
 }
 
+TEST(DriveCommandPolicy, DelayedCycleStopsExpiredCommandWithoutCatchUpOrRetryBurst)
+{
+  Policy policy(20.0, 0.2);
+  const Policy::TimePoint now{};
+  ASSERT_TRUE(policy.accept({ 0.2, 0.1 }, now));
+  ASSERT_EQ(policy.poll(now).action, Action::Drive);
+
+  const auto expired = policy.poll(now + 1s);
+  ASSERT_EQ(expired.action, Action::Stop);
+  EXPECT_EQ(expired.stop_reason, Policy::StopReason::Expired);
+  EXPECT_DOUBLE_EQ(expired.command.linear, 0.0);
+  EXPECT_DOUBLE_EQ(expired.command.angular, 0.0);
+  policy.completeStopAttempt(false);
+  EXPECT_FALSE(policy.accept({ 0.3, 0.0 }, now + 1001ms));
+  EXPECT_EQ(policy.poll(now + 1001ms).action, Action::None);
+  EXPECT_EQ(policy.poll(now + 1049ms).action, Action::None);
+  EXPECT_EQ(policy.poll(now + 1050ms).action, Action::Stop);
+  policy.completeStopAttempt(true);
+  EXPECT_EQ(policy.poll(now + 1100ms).action, Action::None);
+  ASSERT_TRUE(policy.accept({ 0.1, -0.1 }, now + 1101ms));
+  const auto fresh = policy.poll(now + 1101ms);
+  ASSERT_EQ(fresh.action, Action::Drive);
+  EXPECT_DOUBLE_EQ(fresh.command.linear, 0.1);
+  EXPECT_DOUBLE_EQ(fresh.command.angular, -0.1);
+}
+
 TEST(DriveCommandPolicy, ZeroInputAlsoExpires)
 {
   Policy policy(20.0, 0.2);
@@ -103,6 +129,32 @@ TEST(DriveCommandPolicy, FailedStopRetriesAreRateLimitedAndBlockMovement)
   policy.requestStop();
   EXPECT_EQ(policy.poll(now + 1ms).action, Action::None);
   EXPECT_EQ(policy.poll(now + 50ms).action, Action::Stop);
+}
+
+TEST(DriveCommandPolicy, StopReasonsDistinguishExpiryExplicitAndInternalRequests)
+{
+  Policy policy(20.0, 0.2);
+  const Policy::TimePoint now{};
+  ASSERT_TRUE(policy.accept({ 0.2, 0.1 }, now));
+  EXPECT_EQ(policy.poll(now).stop_reason, Policy::StopReason::None);
+  const auto expired = policy.poll(now + 200ms);
+  ASSERT_EQ(expired.action, Action::Stop);
+  EXPECT_EQ(expired.stop_reason, Policy::StopReason::Expired);
+  policy.completeStopAttempt(false);
+  policy.requestStop(Policy::StopReason::Explicit);
+  const auto retry = policy.poll(now + 250ms);
+  ASSERT_EQ(retry.action, Action::Stop);
+  EXPECT_EQ(retry.stop_reason, Policy::StopReason::Expired);
+  policy.completeStopAttempt(true);
+  policy.requestStop(Policy::StopReason::Explicit);
+  const auto explicit_stop = policy.poll(now + 251ms);
+  ASSERT_EQ(explicit_stop.action, Action::Stop);
+  EXPECT_EQ(explicit_stop.stop_reason, Policy::StopReason::Explicit);
+  policy.completeStopAttempt(true);
+  policy.requestStop();
+  const auto internal_stop = policy.poll(now + 252ms);
+  ASSERT_EQ(internal_stop.action, Action::Stop);
+  EXPECT_EQ(internal_stop.stop_reason, Policy::StopReason::Internal);
 }
 
 TEST(DriveCommandPolicy, InvalidCommandsDoNotRefreshFreshness)

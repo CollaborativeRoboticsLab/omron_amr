@@ -5,8 +5,8 @@ TEST_F(DriverInterfaceLoopbackTest, ShippedYamlConfiguresDriverTopicsLimitsAndTf
   driver_.reset();
   executor_.remove_node(node_);
   publisher_.reset();
-  const auto yaml = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
-                    "amr_ros/config/ld250_parameters.yaml";
+  const auto yaml = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() / "amr_ros/config/"
+                                                                                                "ld250_parameters.yaml";
   rclcpp::NodeOptions options;
   options.arguments({ "--ros-args", "--params-file", yaml.string(), "-p", "driver.tf.enabled:=false" });
   node_ = std::make_shared<rclcpp::Node>("amr_core", options);
@@ -21,11 +21,10 @@ TEST_F(DriverInterfaceLoopbackTest, ShippedYamlConfiguresDriverTopicsLimitsAndTf
       "/tf", 10, [&received_tf](const tf2_msgs::msg::TFMessage&) { received_tf = true; });
   driver_ = std::make_unique<DriverInterface>(node_, docking_);
   initializeDriver();
-  ASSERT_TRUE(waitWithExecutor([&stop_publisher, &received_odom]() {
-    return stop_publisher->get_subscription_count() > 0 && received_odom;
-  }));
+  ASSERT_TRUE(waitWithExecutor(
+      [&stop_publisher, &received_odom]() { return stop_publisher->get_subscription_count() > 0 && received_odom; }));
   publish(-0.5, 0.0);
-  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-20.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-10.0, 0.0); }));
   const auto started = std::chrono::steady_clock::now();
   ASSERT_TRUE(waitWithExecutor([started]() { return std::chrono::steady_clock::now() - started > 300ms; }));
   EXPECT_FALSE(received_tf);
@@ -34,6 +33,34 @@ TEST_F(DriverInterfaceLoopbackTest, ShippedYamlConfiguresDriverTopicsLimitsAndTf
 TEST_F(DriverInterfaceLoopbackTest, StreamsForwardThenStops)
 {
   checkVelocityStream(0.5, 0.0);
+}
+
+TEST_F(DriverInterfaceLoopbackTest, StreamsAtConfiguredRateBeforeExpiry)
+{
+  node_->declare_parameter<double>("driver.drive.send_frequency", 5.0);
+  node_->set_parameter(rclcpp::Parameter("driver.drive.send_frequency", 5.0));
+  node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 3.0);
+  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 3.0));
+  initializeDriver();
+  publish(0.4, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(40.0, 0.0); }));
+
+  std::chrono::steady_clock::time_point deadline;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ASSERT_FALSE(records_.empty());
+    deadline = records_.front().received_at + 1200ms;
+  }
+  ASSERT_TRUE(waitWithExecutor([deadline]() { return std::chrono::steady_clock::now() >= deadline; }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto count = std::count_if(records_.begin(), records_.end(), [deadline](const Record& record) {
+    return record.received_at < deadline && !record.stop && std::fabs(record.translation - 40.0) < 1e-3 &&
+           std::fabs(record.rotation) < 1e-3;
+  });
+  EXPECT_GE(count, 3);
+  EXPECT_LE(count, 9);
+  EXPECT_TRUE(std::none_of(records_.begin(), records_.end(),
+                           [deadline](const Record& record) { return record.received_at < deadline && record.stop; }));
 }
 
 TEST_F(DriverInterfaceLoopbackTest, StreamsReverseThenStops)
@@ -61,6 +88,46 @@ TEST_F(DriverInterfaceLoopbackTest, StreamsForwardRightThenStops)
   checkVelocityStream(0.5, -0.5);
 }
 
+TEST_F(DriverInterfaceLoopbackTest, FreshTargetsTransitionThroughZeroWithoutStop)
+{
+  node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 2.0);
+  initializeDriver();
+  const auto matches = [](const Record& record, double translation, double rotation) {
+    return !record.stop && std::fabs(record.translation - translation) < 1e-3 &&
+           std::fabs(record.rotation - rotation) < 1e-3;
+  };
+  const double rotation = 0.2 * 180.0 / M_PI / 60.0 * 100.0;
+
+  publish(0.4, 0.2);
+  ASSERT_TRUE(waitWithExecutor([this, rotation]() { return receivedDrive(40.0, rotation); }));
+  publish(0.0, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this, &matches, rotation]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto first = std::find_if(records_.begin(), records_.end(), [&matches, rotation](const Record& record) {
+      return matches(record, 40.0, rotation);
+    });
+    return first != records_.end() && std::any_of(first + 1, records_.end(), [&matches](const Record& record) {
+             return matches(record, 0.0, 0.0);
+           });
+  }));
+  publish(-0.1, -0.2);
+  ASSERT_TRUE(waitWithExecutor([this, rotation]() { return receivedDrive(-10.0, -rotation); }));
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto first = std::find_if(records_.begin(), records_.end(), [&matches, rotation](const Record& record) {
+    return matches(record, 40.0, rotation);
+  });
+  ASSERT_NE(first, records_.end());
+  const auto zero =
+      std::find_if(first + 1, records_.end(), [&matches](const Record& record) { return matches(record, 0.0, 0.0); });
+  ASSERT_NE(zero, records_.end());
+  const auto last = std::find_if(zero + 1, records_.end(), [&matches, rotation](const Record& record) {
+    return matches(record, -10.0, -rotation);
+  });
+  ASSERT_NE(last, records_.end());
+  EXPECT_TRUE(std::none_of(first, last + 1, [](const Record& record) { return record.stop; }));
+}
+
 TEST_F(DriverInterfaceLoopbackTest, ForwardHalfMetreCommandStopsWithoutResuming)
 {
   node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 0.2);
@@ -83,6 +150,40 @@ TEST_F(DriverInterfaceLoopbackTest, ForwardHalfMetreCommandStopsWithoutResuming)
   const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
   ASSERT_NE(stop, records_.end());
   EXPECT_TRUE(std::none_of(stop + 1, records_.end(), [](const Record& record) { return !record.stop; }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ExplicitStopClearsOldTargetUntilFreshCommand)
+{
+  node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 1.0);
+  auto stop_publisher = node_->create_publisher<std_msgs::msg::Empty>("/drive_test/stop", 10);
+  initializeDriver();
+  ASSERT_TRUE(waitWithExecutor([&stop_publisher]() { return stop_publisher->get_subscription_count() > 0; }));
+
+  publish(0.4, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(40.0, 0.0); }));
+  stop_publisher->publish(std_msgs::msg::Empty{});
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  const auto stop_received = std::chrono::steady_clock::now();
+  ASSERT_TRUE(
+      waitWithExecutor([stop_received]() { return std::chrono::steady_clock::now() - stop_received >= 300ms; }));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+    ASSERT_NE(stop, records_.end());
+    EXPECT_TRUE(std::none_of(stop + 1, records_.end(), [](const Record& record) { return !record.stop; }));
+  }
+
+  publish(-0.1, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-10.0, 0.0); }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  ASSERT_NE(stop, records_.end());
+  EXPECT_TRUE(std::none_of(stop + 1, records_.end(), [](const Record& record) {
+    return !record.stop && std::fabs(record.translation - 40.0) < 1e-3;
+  }));
 }
 
 TEST_F(DriverInterfaceLoopbackTest, RelativeOdometryAtZeroDegreeOrigin)
@@ -253,10 +354,80 @@ TEST_F(DriverInterfaceLoopbackTest, ExpiresEvenWhenRosExecutorIsNotSpinning)
   initializeDriver();
   publish(0.6, 0.0);
   ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
-  std::unique_lock<std::mutex> lock(mutex_);
-  ASSERT_TRUE(changed_.wait_for(lock, 2s, [this]() { return !records_.empty() && records_.back().stop; }));
-  const auto stopped_count = records_.size();
-  EXPECT_FALSE(changed_.wait_for(lock, 150ms, [this, stopped_count]() { return records_.size() != stopped_count; }));
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    ASSERT_TRUE(changed_.wait_for(lock, 2s, [this]() { return !records_.empty() && records_.back().stop; }));
+    const auto stopped_count = records_.size();
+    EXPECT_FALSE(changed_.wait_for(lock, 150ms, [this, stopped_count]() { return records_.size() != stopped_count; }));
+  }
+  publish(-0.1, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(-10.0, 0.0); }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  ASSERT_NE(stop, records_.end());
+  EXPECT_TRUE(std::none_of(stop + 1, records_.end(), [](const Record& record) {
+    return !record.stop && std::fabs(record.translation - 60.0) < 1e-3;
+  }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, ExpiresWhileRosTimeIsPaused)
+{
+  ASSERT_TRUE(node_->set_parameter(rclcpp::Parameter("use_sim_time", true)).successful);
+  ASSERT_TRUE(waitWithExecutor([this]() { return node_->get_clock()->ros_time_is_active(); }));
+  initializeDriver();
+  const auto ros_time = node_->now();
+  publish(0.6, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  }));
+  EXPECT_EQ(node_->now(), ros_time);
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto stop = std::find_if(records_.begin(), records_.end(), [](const Record& record) { return record.stop; });
+  ASSERT_NE(stop, records_.end());
+  EXPECT_TRUE(std::none_of(stop + 1, records_.end(), [](const Record& record) { return !record.stop; }));
+}
+
+TEST_F(DriverInterfaceLoopbackTest, RosTimeJumpsDoNotChangeCommandExpiry)
+{
+  ASSERT_TRUE(node_->set_parameter(rclcpp::Parameter("use_sim_time", true)).successful);
+  ASSERT_TRUE(waitWithExecutor([this]() { return node_->get_clock()->ros_time_is_active(); }));
+  const auto set_ros_time = [this](rcl_time_point_value_t time) {
+    auto clock = node_->get_clock();
+    std::lock_guard<std::mutex> lock(clock->get_clock_mutex());
+    return rcl_set_ros_time_override(clock->get_clock_handle(), time);
+  };
+  ASSERT_EQ(set_ros_time(10'000'000'000LL), RCL_RET_OK);
+  node_->declare_parameter<double>("driver.cmd_vel.timeout_sec", 1.5);
+  node_->set_parameter(rclcpp::Parameter("driver.cmd_vel.timeout_sec", 1.5));
+  initializeDriver();
+  publish(0.6, 0.0);
+  ASSERT_TRUE(waitWithExecutor([this]() { return receivedDrive(60.0, 0.0); }));
+
+  for (const auto time : { 3'600'000'000'000LL, 1'000'000'000LL })
+  {
+    std::size_t previous_count;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      previous_count = records_.size();
+    }
+    ASSERT_EQ(set_ros_time(time), RCL_RET_OK);
+    EXPECT_EQ(node_->now().nanoseconds(), time);
+    ASSERT_TRUE(waitWithExecutor([this, previous_count]() {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return records_.size() > previous_count;
+    }));
+    std::lock_guard<std::mutex> lock(mutex_);
+    ASSERT_TRUE(std::none_of(records_.begin(), records_.end(), [](const Record& record) { return record.stop; }));
+    EXPECT_NEAR(records_.back().translation, 60.0, 1e-3);
+  }
+
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return !records_.empty() && records_.back().stop;
+  }));
+  EXPECT_EQ(node_->now().nanoseconds(), 1'000'000'000LL);
 }
 
 TEST_F(DriverInterfaceLoopbackTest, EnforcesConfiguredReverseLimitBeforeRatioConversion)

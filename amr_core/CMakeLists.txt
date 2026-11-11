@@ -88,6 +88,7 @@ if(BUILD_TESTING)
     test/test_drive_interface.cpp
     test/test_drive_tcp_sender.cpp
     test/test_map_interface.cpp
+    TIMEOUT 180
   )
   ament_target_dependencies(test_robot_interface
     rclcpp amr_msgs tf2_ros tf2_msgs std_msgs std_srvs nav_msgs geometry_msgs

@@ -57,17 +57,15 @@ Driver parameters use the nested names above; old flat names are not aliases and
 
 ## Derived Nav2 limits
 
-The Nav2 YAML files were updated to match the driver limits as closely as possible:
+The LD250 Nav2 velocity smoother configures:
 
-- max forward linear velocity: `1.2 m/s`
-- max reverse linear velocity: `-0.2 m/s`
-- max angular velocity: `1.0472 rad/s`
+- max forward linear velocity: `1.0 m/s`
+- max reverse linear velocity: `-0.1 m/s`
+- max angular velocity: `1.0 rad/s`
 
-These values appear in:
-
-- `controller_server.FollowPath`
-- `behavior_server`
-- `velocity_smoother`
+The source LD250 driver reverse clamp is also `-0.1 m/s`; the running driver
+must be checked separately. These values do not establish calibrated physical
+speeds or reverse capability.
 
 ## Nav2 parameter files
 

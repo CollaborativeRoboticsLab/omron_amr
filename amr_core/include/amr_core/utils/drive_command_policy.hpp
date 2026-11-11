@@ -20,18 +20,47 @@ public:
     double angular{ 0.0 };
   };
 
-  enum class Action { None, Drive, Stop };
+  enum class Action
+  {
+    None,
+    Drive,
+    Stop
+  };
+  enum class StopReason
+  {
+    None,
+    Explicit,
+    Expired,
+    Internal
+  };
 
   struct Decision
   {
     Action action{ Action::None };
     Command command;
+    StopReason stop_reason{ StopReason::None };
   };
+
+  static const char* describeStopReason(StopReason reason)
+  {
+    switch (reason)
+    {
+      case StopReason::Explicit:
+        return "explicit request";
+      case StopReason::Expired:
+        return "command expired";
+      case StopReason::Internal:
+        return "internal control or safety condition";
+      case StopReason::None:
+        return "unknown";
+    }
+    return "unknown";
+  }
 
   DriveCommandPolicy(double send_frequency, double timeout_seconds)
   {
-    if (!std::isfinite(send_frequency) || send_frequency <= 0.0 ||
-        !std::isfinite(timeout_seconds) || timeout_seconds <= 0.0)
+    if (!std::isfinite(send_frequency) || send_frequency <= 0.0 || !std::isfinite(timeout_seconds) ||
+        timeout_seconds <= 0.0)
     {
       throw std::invalid_argument("Drive frequency and command timeout must be finite and positive");
     }
@@ -66,10 +95,10 @@ public:
     return true;
   }
 
-  void requestStop()
+  void requestStop(StopReason reason = StopReason::Internal)
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    requestStopLocked();
+    requestStopLocked(reason);
   }
 
   Decision poll(TimePoint now)
@@ -77,7 +106,7 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     if (have_command_ && now - received_at_ >= timeout_)
     {
-      requestStopLocked();
+      requestStopLocked(StopReason::Expired);
     }
     if (!have_command_ && !stop_pending_)
     {
@@ -90,7 +119,7 @@ public:
     scheduled_ = true;
     urgent_stop_ = false;
     next_send_ = now + send_interval_;
-    return { stop_pending_ ? Action::Stop : Action::Drive, command_ };
+    return { stop_pending_ ? Action::Stop : Action::Drive, command_, stop_pending_ ? stop_reason_ : StopReason::None };
   }
 
   void completeStopAttempt(bool queued)
@@ -103,7 +132,7 @@ public:
   }
 
 private:
-  void requestStopLocked()
+  void requestStopLocked(StopReason reason)
   {
     have_command_ = false;
     command_ = {};
@@ -111,6 +140,7 @@ private:
     {
       stop_pending_ = true;
       urgent_stop_ = true;
+      stop_reason_ = reason;
     }
   }
 
@@ -122,8 +152,9 @@ private:
   TimePoint next_send_{};
   bool have_command_{ false };
   bool stop_pending_{ false };
+  StopReason stop_reason_{ StopReason::None };
   bool urgent_stop_{ false };
   bool scheduled_{ false };
 };
 
-}
+}  // namespace amr_core

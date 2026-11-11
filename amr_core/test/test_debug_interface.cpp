@@ -38,6 +38,57 @@ TEST_F(DriverInterfaceLoopbackTest, FaultMonitorRejectsUndocumentedTrailingBytes
   EXPECT_TRUE(fault_ack_requests_.empty());
 }
 
+TEST_F(DriverInterfaceLoopbackTest, FaultMonitorRejectsEmptyReplies)
+{
+  enableAutomaticFaultAcknowledgement();
+  fake_faults_ = { "IrregularShutdown" };
+  empty_fault_replies_ = true;
+  initializeDockingBackend();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_queries_ >= 3;
+  }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  EXPECT_TRUE(fault_ack_requests_.empty());
+}
+
+TEST_F(DriverInterfaceLoopbackTest, FaultMonitorPreservesAcknowledgedFaultAcrossEmptyReplies)
+{
+  enableAutomaticFaultAcknowledgement();
+  fake_faults_ = { "IrregularShutdown" };
+  initializeDockingBackend();
+  ASSERT_TRUE(waitWithExecutor([this]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_ack_requests_.size() == 1;
+  }));
+  int before_empty;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    before_empty = fault_queries_;
+    empty_fault_replies_ = true;
+  }
+  ASSERT_TRUE(waitWithExecutor([this, before_empty]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_queries_ >= before_empty + 2;
+  }));
+  int before_valid;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ASSERT_EQ(fault_ack_requests_.size(), 1u);
+    before_valid = fault_queries_;
+    empty_fault_replies_ = false;
+  }
+  ASSERT_TRUE(waitWithExecutor([this, before_valid]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return fault_queries_ >= before_valid + 2;
+  }));
+  const auto observed = std::chrono::steady_clock::now();
+  ASSERT_TRUE(waitWithExecutor([observed]() { return std::chrono::steady_clock::now() - observed >= 250ms; }));
+  std::lock_guard<std::mutex> lock(mutex_);
+  ASSERT_EQ(fault_ack_requests_.size(), 1u);
+  EXPECT_EQ(fault_ack_requests_.front().second, "IrregularShutdown");
+}
+
 TEST_F(DriverInterfaceLoopbackTest, FaultMonitorAutomaticAcknowledgementRequiresOptIn)
 {
   node_->declare_parameter<bool>("fault.monitor.auto_acknowledge_enabled", true);
@@ -274,4 +325,3 @@ TEST_F(DriverInterfaceLoopbackTest, ShutdownRejectsStaleTelemetry)
   std::lock_guard<std::mutex> lock(mutex_);
   EXPECT_EQ(shutdown_requests_, 0);
 }
-

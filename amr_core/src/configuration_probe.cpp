@@ -199,6 +199,16 @@ public:
 
   void faults(ArNetPacket* packet)
   {
+    if (packet && packet->isValid() && packet->getDataReadLength() <= packet->getDataLength())
+    {
+      const auto remaining = packet->getDataLength() - packet->getDataReadLength();
+      const auto* payload = packet->getBuf() + packet->getReadLength();
+      std::cout << "FAULT_FRAME bytes=" << remaining;
+      if (remaining >= 2)
+        std::cout << " header=" << static_cast<unsigned int>(static_cast<unsigned char>(payload[0])) << ","
+                  << static_cast<unsigned int>(static_cast<unsigned char>(payload[1]));
+      std::cout << std::endl;
+    }
     std::uint16_t count = 0;
     if (!amr_core::DebugInterface::readFaultCount(packet, count))
     {
@@ -455,7 +465,7 @@ int main(int argc, char** argv)
                            client.requestOnce("queryMotors", nullptr, true) &&
                            client.requestOnce("getFaults", nullptr, true);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
-        while (ready && client.isConnected() && !observation.malformed &&
+        while (ready && client.isConnected() &&
                (observation.motor_samples == 0 || observation.fault_samples == 0) &&
                std::chrono::steady_clock::now() < deadline)
           client.loopOnce();

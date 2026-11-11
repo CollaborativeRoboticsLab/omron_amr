@@ -197,6 +197,12 @@ protected:
     std::lock_guard<std::mutex> lock(mutex_);
     ++fault_queries_;
     ArNetPacket packet;
+    if (empty_fault_replies_)
+    {
+      client->sendPacketTcp(&packet);
+      changed_.notify_all();
+      return;
+    }
     packet.uByte2ToBuf(static_cast<unsigned short>(fake_faults_.size()));
     for (const auto& name : fake_faults_)
     {
@@ -590,6 +596,7 @@ protected:
   std::vector<std::pair<std::uint8_t, std::string>> fault_ack_requests_;
   std::vector<std::string> fake_faults_;
   int fault_queries_{ 0 };
+  bool empty_fault_replies_{ false };
   bool fault_trailing_bytes_{ false };
   std::unique_ptr<DriverInterface> driver_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;

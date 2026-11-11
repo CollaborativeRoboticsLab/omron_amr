@@ -64,7 +64,7 @@ amr_core:
         publish: true
       cmd_vel:
         topic: "cmd_vel"
-        min_linear: -200.0
+        min_linear: -100.0
         max_linear: 1000.0
         min_angular: -60.0
         max_angular: 60.0

@@ -17,6 +17,11 @@ contained 115 cases, including 67 loopback cases; the current layout differs.
 Offline tests do not establish
 physical motion, firmware behavior or safety performance.
 
+On 2026-11-11, all four registered core test groups passed in an isolated ROS
+domain, including 122 core GoogleTests. Nav2 integration and SLAM map padding
+also passed. All 21 Nav2 contract checks passed after changing the LD250 source
+reverse limit; that configuration is not installed or active.
+
 A loopback test withholds docking replies after undocking, then resumes them;
 it verifies at least one poll reaches the fake server during the gap, the driver
 requests stop, and the failure remains latched after fresh Undocked feedback.
@@ -76,18 +81,25 @@ With separate approval for read-only access, run the connectivity and configurat
 
 ```bash
 source install/setup.bash
-PYTHONPATH=src/omron_amr/amr_core/test python3 -m pytest -p test_configuration \
+PYTHONPATH="src/omron_amr/amr_core/test:$PYTHONPATH" python3 -m pytest -p test_configuration \
 	src/omron_amr/amr_core/test/test_connectivity.py \
 	src/omron_amr/amr_core/test/test_config.py \
-	--robot -m 'connectivity or config' -v \
-	--junitxml=build/amr_core/hardware-readonly-results.xml
+	--robot -m 'connectivity or config' -q --tb=no \
+	--robot-capture "build/amr_core/hardware-config-readonly-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
+
+On 2026-11-11, these nine read-only checks passed, including stationary
+telemetry and a configuration snapshot. A separate docking query returned
+Docked; the fault query returned malformed data, so its fault status is unknown.
+The operator reported no faults shown on the robot display.
+After the operator authorized a stack start, `drive_ready` was false while docked;
+this is not a protective function.
 
 ### Charging, Odometry and Battery
 
 Docking state and motion telemetry were read during the tests. The operator reported the charging situation, but no separate end-to-end acceptance of the charging and battery interfaces is documented here. Odometry supplied the motion guards and reported displacement and velocity; its accuracy and units have not been independently verified against a physical reference.
 
-Two earlier firmware-backed undock actions timed out without observed movement. On 2026-10-30, the operator reported physical departure on two separately authorized firmware undock attempts, but both ROS actions failed. The latest reported stale docking feedback followed by fresh Undocked and stationary feedback; the feedback gap remains unresolved. See [known issues](../../known_issues.md).
+On 2026-11-10, a supervised undock physically departed according to the operator, but the ROS action failed after stale feedback; the largest observed gap was 1,092 ms. On 2026-11-11, one supervised undock returned success, readback reported Undocked and stationary, and the operator confirmed departure and stopping. Feedback timing and the physical effect of the configured five-second limit remain uncharacterized. See [known issues](../../known_issues.md).
 
 The following read-only observer records odometry and checks the expected dead zones; it is not a charging or battery acceptance test. Use a new output filename and obtain separate approval for robot access:
 
@@ -100,12 +112,14 @@ ros2 run amr_core amr_deadzone_calibration --robot \
 
 ## Supervised Motion Tests
 
-These are evidence that basic command paths can produce motion, not acceptance of distance tracking, trajectory following or protective stopping. The available audits do not independently establish a completed standalone physical test of each in-place turn.
+These are evidence that basic command paths can produce motion, not acceptance of distance tracking, trajectory following or protective stopping. The available audits do not independently establish a completed standalone physical test of the right in-place turn.
 
 | Trial | Recorded result |
 | --- | --- |
 | Initial 0.1 s forward pulse | Inhibited by the docking readiness gate; no motion observed. |
 | Forward pulse and ten-pulse retry | Operator observed movement and stopping; ten-pulse retry reported about 0.031 m total odometric displacement. An earlier ten-pulse attempt stopped after one pulse with a guard failure. |
+| 2026-11-11 existing-driver forward pulse | A 0.2 m/s request for 0.5 s produced about 0.058 m odometric displacement and 0.129 m/s peak reported velocity. The operator confirmed forward movement and stopping; stop delivery was not acknowledged. |
+| 2026-11-11 left turn toward 180 degrees | A short pulse and a separately authorized target turn produced about 190 degrees total odometric rotation, including 9 degrees after the second stop request. The operator confirmed turning and stopping, but did not independently measure the angle; stop delivery was not acknowledged. |
 | 0.5 s reverse | Operator observed reverse movement and stopping; about 0.023 m odometric displacement. |
 | 2 s and 6 s reverse | Completed the command stream with stationary post-test telemetry; about 0.094 m and 0.286 m odometric displacement, respectively. |
 | Up to 2 s forward | Displacement guard stopped the stream after about 1.42 s and 0.401 m odometry. Immediate readback failed; the operator later confirmed the robot stopped and a later read-only probe reported stationary. |
@@ -115,6 +129,20 @@ These are evidence that basic command paths can produce motion, not acceptance o
 Recorded displacement is odometry, not ground truth. The guards are not safety-rated, and a stop request being queued does not prove the robot received or acted on it. Audit outcomes with a completed stream are still marked `completed_unverified`, because stop delivery is not acknowledged.
 
 The test-only [pulse runner](drive_pulse.py) sends one selected stream per invocation. Announce each test and obtain fresh explicit authorization; confirm an accessible emergency stop, exclusive control, a clear area, and contact docking with no attached cable. If the E-stop is pressed, keep it engaged until the runner and driver exit. Investigate uncertain results before another test.
+
+The `--existing-driver` option is restricted to a 0.5 s request at 0.2 m/s
+forward or 0.5 rad/s in-place left or right, and does not start or restart a
+driver. It checks for quiet command
+traffic before the pulse and unexpected command values during it, but cannot
+identify an identical command from another publisher or enforce exclusive
+control. Verify the active driver settings separately; the runner's YAML
+checks alone do not establish the running configuration. The 2026-11-11 audit
+is `build/amr_core/drive-pulse/forward-stream-20261111T030433Z.json`.
+The opt-in target-turn mode uses odometric heading with a 12-second command
+limit and is not an accurate-angle or protective stopping controller. Do not
+repeat it until the observed overshoot and stopping behavior are investigated.
+The left-turn audits are `build/amr_core/drive-pulse/left-stream-20261111T031731Z.json`
+and `build/amr_core/drive-pulse/left-stream-20261111T032853Z.json`.
 
 These are individual examples of the supervised stream commands used from the workspace root. Each command can move the robot and requires its own fresh authorization; do not run them as an unattended sequence.
 
@@ -142,7 +170,9 @@ physical stop; investigate uncertain outcomes before any further test.
 
 The driver requests its configured `unsafe_drive` mode at startup. Docking
 readiness and the `drive_ready` topic are not protective safety functions.
-Firmware undocking remains unresolved; see [known issues](../../known_issues.md).
+The operator reports that undocking now works, but feedback timing and the
+physical effect of the configured timeout remain unverified; see
+[known issues](../../known_issues.md).
 
 ## Distance and Velocity Calibration
 

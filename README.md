@@ -86,7 +86,7 @@ ros2 launch amr_ros ld250.launch.py use_nav2:=true use_localization:=true map:=m
 
 Navigation and velocity commands do not initiate undocking. With the hardware interface running, undocking is a separate `nav2_msgs/action/UndockRobot` action. It requires verified contact docking, exclusive control, fresh docking feedback, and stationary telemetry. `driver.undocking.contact_dock_confirmed` is read at startup; `driver.undocking.exclusive_control_confirmed` also defaults to false. Set these confirmations only after verifying the corresponding conditions.
 
-When parking manually, ensure the robot is properly positioned and its display shows the charging state. The dock's yellow charging light alone does not confirm that the robot has registered the charging state.
+
 
 For an explicitly authorized, supervised departure, send one goal:
 

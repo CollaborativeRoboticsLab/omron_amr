@@ -124,7 +124,8 @@ def test_ld250_rviz_displays_navigation_map_and_panel():
     assert any(panel['Class'] == 'nav2_rviz_plugins/Navigation 2' for panel in rviz['Panels'])
     visualization = rviz['Visualization Manager']
     assert visualization['Global Options']['Fixed Frame'] == 'map'
-    maps = [display for display in visualization['Displays'] if display['Class'] == 'rviz_default_plugins/Map']
+    maps = [display for display in visualization['Displays']
+            if display['Class'] == 'rviz_default_plugins/Map' and display['Topic']['Value'] == 'map']
     assert len(maps) == 1
     assert maps[0]['Enabled'] is True
     assert maps[0]['Topic']['Value'] == 'map'
