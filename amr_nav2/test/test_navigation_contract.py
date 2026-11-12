@@ -100,6 +100,29 @@ def test_default_navigation_parameter_file_exists():
     assert (PACKAGE.joinpath(*suffix)).is_file()
 
 
+def test_navigation_composition_conditions_accept_launch_booleans(monkeypatch):
+    from launch import LaunchContext
+
+    spec = importlib.util.spec_from_file_location('nav2_launch', LAUNCH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    captured = {}
+    for action_name in ('GroupAction', 'LoadComposableNodes'):
+        original = getattr(module, action_name)
+
+        def capture(*args, original=original, action_name=action_name, **kwargs):
+            captured[action_name] = kwargs['condition']
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(module, action_name, capture)
+    module.generate_launch_description()
+    for value, composed in (('false', False), ('False', False), ('true', True), ('True', True)):
+        context = LaunchContext()
+        context.launch_configurations['use_composition'] = value
+        assert captured['GroupAction'].evaluate(context) is not composed
+        assert captured['LoadComposableNodes'].evaluate(context) is composed
+
+
 def test_default_slam_parameters_match_ld250_frames_and_relative_scan(monkeypatch):
     spec = importlib.util.spec_from_file_location('slam_launch', PACKAGE / 'launch/slam.launch.py')
     module = importlib.util.module_from_spec(spec)
