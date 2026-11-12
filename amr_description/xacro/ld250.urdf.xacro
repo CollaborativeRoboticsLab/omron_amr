@@ -57,6 +57,13 @@
       <origin xyz="0.45 0 0.195"/>
     </joint>
 
+    <link name="${prefix}laser_frame_low"/>
+    <joint name="${prefix}base_link_to_laser_frame_low" type="fixed">
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}laser_frame_low"/>
+      <origin xyz="0.40 0 0.060"/>
+    </joint>
+
     <!-- Optional mounting to an external parent -->
     <xacro:if value="${parent != ''}">
       <joint name="${prefix}base_mount" type="fixed">
